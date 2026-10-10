@@ -215,7 +215,7 @@ impl Parser<'_> {
                     .in_rule(&reference.name)
                 })
             }
-            Node::Reference(_) | Node::Constant(_) | Node::Unsupported(_) => Ok(node),
+            Node::Reference(_) | Node::Constant(_) => Ok(node),
             other => {
                 let copy = other
                     .map_children(|child| self.substitute(mechanism, child, declared, args))?;

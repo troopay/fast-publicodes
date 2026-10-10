@@ -1,21 +1,28 @@
 //! Evaluation of nodes, cached for the current situation.
 
+mod arrondi;
 mod condition;
+mod dates;
 mod js_value;
 mod missing;
 mod operation;
 mod rule;
+mod sub_engines;
+mod tranches;
 mod units;
 mod variations;
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub use condition::Branch;
+pub use js_value::to_number;
 pub use missing::Missing;
 pub use operation::Operand;
 
-use crate::ast::{NameId, Node, NodeId, PossibilityKind, Program, Value};
+use crate::ast::{NameId, Node, NodeId, PossibilityKind, Program, TextPart, Value};
 use crate::error::{Error, ErrorKind, Result};
+use crate::format::format_value;
 use crate::units::Unit;
 
 /// The `unit` key of an evaluated node: absent, present but undefined, or set.
@@ -63,23 +70,55 @@ impl Evaluated {
     }
 }
 
-/// Caches and stacks that live as long as a situation.
+/// The state of an engine for its situation: caches, stacks and sub-engines.
 #[derive(Debug, Default)]
 pub struct EvalState {
     cache: Vec<Option<Evaluated>>,
     rule_stack: Vec<NameId>,
     parent_stack: Vec<NameId>,
+    /// Rules the situations of enclosing sub-engines define, innermost last.
+    layers: Vec<HashMap<NameId, NodeId>>,
+    /// The values sub-engines give their `SituationInput` nodes.
+    inputs: HashMap<NodeId, Evaluated>,
+    /// The sub-engine of each `contexte`, by mechanism.
+    sub_engines: HashMap<u64, EvalState>,
+    /// The amended situation this sub-engine evaluates a `contexte` in.
+    contexte_situation: Option<Vec<(NameId, u64)>>,
+    inversion_fail: bool,
 }
 
 impl EvalState {
+    /// Clears everything a situation determines, keeping the rules defined by sub-engines.
     pub fn clear(&mut self) {
         self.cache.clear();
         self.reset_stacks();
+        self.sub_engines.clear();
+        self.contexte_situation = None;
+        self.inversion_fail = false;
     }
 
     pub fn reset_stacks(&mut self) {
         self.rule_stack.clear();
         self.parent_stack.clear();
+    }
+
+    /// Whether an inversion failed in the current situation.
+    pub fn inversion_fail(&self) -> bool {
+        self.inversion_fail
+    }
+
+    /// `shallowCopy`: a sub-engine seeing the same rules, with this cache if `copy_cache`.
+    fn fork(&self, copy_cache: bool) -> EvalState {
+        EvalState {
+            cache: if copy_cache {
+                self.cache.clone()
+            } else {
+                Vec::new()
+            },
+            layers: self.layers.clone(),
+            inputs: self.inputs.clone(),
+            ..EvalState::default()
+        }
     }
 }
 
@@ -94,6 +133,16 @@ impl<'a> Evaluator<'a> {
             state.cache.resize(program.nodes.len(), None);
         }
         Self { program, state }
+    }
+
+    /// The rule node defining `name` for this engine.
+    fn rule_node(&self, name: NameId) -> Option<NodeId> {
+        self.state
+            .layers
+            .iter()
+            .rev()
+            .find_map(|layer| layer.get(&name).copied())
+            .or_else(|| self.program.rule_node(name))
     }
 
     fn cached(&self, id: NodeId) -> Option<&Evaluated> {
@@ -120,7 +169,7 @@ impl<'a> Evaluator<'a> {
             Node::Reference(reference) => {
                 let rule = reference
                     .target
-                    .and_then(|target| program.rule_node(target))
+                    .and_then(|target| self.rule_node(target))
                     .ok_or_else(|| {
                         Error::new(
                             ErrorKind::Internal,
@@ -157,6 +206,48 @@ impl<'a> Evaluator<'a> {
                 })
             }
             Node::Unite { unit, valeur } => self.unite(unit, *valeur),
+            Node::Arrondi { valeur, arrondi } => self.arrondi(*valeur, *arrondi),
+            Node::Duree {
+                depuis,
+                jusqua,
+                unit,
+            } => self.duree(*depuis, *jusqua, unit),
+            Node::Logarithme(valeur) => {
+                let valeur = self.evaluate(*valeur)?;
+                let valeur = self.simplify_node_unit(valeur)?;
+                let value = match valeur.value {
+                    Value::Null | Value::Undefined => valeur.value,
+                    Value::Number(n) => Value::Number(n.ln()),
+                    other => {
+                        return Err(Error::evaluation(format!(
+                            "Impossible de calculer le logarithme de {}",
+                            js_value::to_js_string(&other)
+                        )));
+                    }
+                };
+                Ok(Evaluated::new(value, valeur.missing))
+            }
+            Node::Texte(parts) => {
+                let mut text = String::new();
+                let mut missing = Missing::default();
+                for part in parts {
+                    match part {
+                        TextPart::Text(literal) => text.push_str(literal),
+                        TextPart::Node(node) => {
+                            let evaluated = self.evaluate(*node)?;
+                            text.push_str(&format_value(&evaluated.value, evaluated.unit.get())?);
+                            missing = missing.merge(&evaluated.missing);
+                        }
+                    }
+                }
+                Ok(Evaluated::new(Value::String(text.into()), missing))
+            }
+            Node::Tranches {
+                mechanism,
+                assiette,
+                multiplicateur,
+                tranches,
+            } => self.tranches(*mechanism, *assiette, *multiplicateur, tranches),
             Node::SimplifierUnite(valeur) => self.simplifier_unite(*valeur),
             Node::UnePossibilite {
                 kind,
@@ -177,10 +268,36 @@ impl<'a> Evaluator<'a> {
                     missing: Missing::default(),
                 })
             }
-            Node::Unsupported(mechanism) => Err(Error::new(
-                ErrorKind::Unsupported,
-                format!("Le mécanisme \"{mechanism}\" n'est pas encore supporté"),
-            )),
+            Node::Contexte { valeur, pairs, id } => self.contexte(*valeur, pairs, *id),
+            Node::Inversion {
+                rule,
+                candidates,
+                min,
+                max,
+                tolerance,
+                rules,
+            } => {
+                let rules = rules.as_ref().ok_or_else(unprepared)?;
+                self.inversion(*rule, candidates, (*min, *max, *tolerance), rules)
+            }
+            Node::ResoudreReferenceCirculaire {
+                rule,
+                valeur,
+                rules,
+            } => {
+                let rules = rules.ok_or_else(unprepared)?;
+                self.resoudre_reference_circulaire(*rule, *valeur, rules)
+            }
+            Node::SituationInput => Ok(self
+                .state
+                .inputs
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| Evaluated::new(Value::Undefined, Missing::default()))),
         }
     }
+}
+
+fn unprepared() -> Error {
+    Error::new(ErrorKind::Internal, "Mécanisme évalué avant sa préparation")
 }

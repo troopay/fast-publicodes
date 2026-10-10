@@ -72,6 +72,60 @@ rules:
     contexte:
       revenu: 50000 €/an
   texte: "'bonjour'"
+  revenu inconnu:
+    question: Quel revenu exact ?
+    unité: €/an
+  barème inconnu:
+    barème:
+      assiette: revenu inconnu
+      tranches:
+        - taux: 10%
+          plafond: 20000 €/an
+        - taux: 20%
+  barème multiplicateur:
+    barème:
+      assiette: revenu
+      multiplicateur: plafond sécurité sociale
+      tranches:
+        - taux: 5%
+          plafond: 1
+        - taux: 10%
+          plafond: 2
+        - taux: 20%
+  grille inconnue:
+    grille:
+      assiette: revenu inconnu
+      tranches:
+        - montant: 1 €/an
+          plafond: 20000 €/an
+        - montant: 2 €/an
+  grille bornée:
+    grille:
+      assiette: revenu
+      tranches:
+        - montant: 10 €/an
+          plafond: 20000 €/an
+        - montant: 20 €/an
+          plafond: 50000 €/an
+  taux progressif inconnu:
+    taux progressif:
+      assiette: revenu inconnu
+      tranches:
+        - taux: 10%
+          plafond: 20000 €/an
+        - taux: 0%
+          plafond: 60000 €/an
+  arrondi inconnu:
+    valeur: revenu inconnu / 3
+    arrondi: 1 décimale
+  texte interpolé:
+    texte: "Revenu : {{ revenu }}, PSS : {{ plafond sécurité sociale }}, taux : {{ 12.345% }}, applicable : {{ revenu > 0 €/an }}, inconnu : {{ revenu inconnu }}."
+  texte euros:
+    texte: "{{ revenu / 7 * 1 an }} et {{ 1234567.891 }}"
+  logarithme:
+    logarithme: revenu / 1 €/an
+  logarithme inconnu:
+    logarithme: revenu inconnu / 1 €/an
 situations:
   vide: {}
   revenu nul:
@@ -80,3 +134,8 @@ situations:
     revenu: 45000
   revenu élevé:
     revenu: 120000
+  bornes exactes:
+    revenu: 20000
+    revenu inconnu: 50000
+  revenu inconnu renseigné:
+    revenu inconnu: 33333

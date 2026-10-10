@@ -80,6 +80,7 @@ function sameValue(a: unknown, b: unknown): boolean {
   if (typeof a === "number" && typeof b === "number") {
     return (
       a === b ||
+      (Number.isNaN(a) && Number.isNaN(b)) ||
       Math.abs(a - b) <= RELATIVE_TOLERANCE * Math.max(Math.abs(a), Math.abs(b))
     );
   }

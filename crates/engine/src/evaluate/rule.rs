@@ -128,12 +128,10 @@ impl Evaluator<'_> {
                 }
                 Ok(Evaluated::new(inner.value, missing))
             }
-            Node::Reference(reference) => {
-                match reference.target.and_then(|t| program.rule_node(t)) {
-                    Some(rule) => self.est_non_applicable(rule),
-                    None => Ok(Evaluated::new(Value::Undefined, Missing::default())),
-                }
-            }
+            Node::Reference(reference) => match reference.target.and_then(|t| self.rule_node(t)) {
+                Some(rule) => self.est_non_applicable(rule),
+                None => Ok(Evaluated::new(Value::Undefined, Missing::default())),
+            },
             Node::Condition { si, alors, sinon } => self.condition(
                 *si,
                 Branch::NotApplicable(*alors),
@@ -156,7 +154,7 @@ impl Evaluator<'_> {
         program
             .names
             .get(&name)
-            .and_then(|id| program.rule_node(id))
+            .and_then(|id| self.rule_node(id))
             .and_then(|node| program.ty(node))
             .is_some_and(|t| t.nullable == Some(true))
     }

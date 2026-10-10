@@ -33,7 +33,8 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(rules: &Json) -> Result<Self> {
+    /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`.
+    pub fn new(rules: &Json, today: &str) -> Result<Self> {
         if !rules.is_object() {
             return Err(Error::new(
                 ErrorKind::Engine,
@@ -41,6 +42,7 @@ impl Engine {
             ));
         }
         let mut program = Program::default();
+        program.today = today.to_owned();
         let templates = Templates::new(&mut program)?;
         let mut parser = Parser::new(&mut program, &templates, "");
         parser.parse_rules(&Raw::from(rules))?;
@@ -175,6 +177,11 @@ impl Engine {
             unit: evaluated.unit.get().cloned(),
             missing: evaluated.missing,
         })
+    }
+
+    /// Whether an `inversion numérique` failed since the situation was set.
+    pub fn inversion_fail(&self) -> bool {
+        self.state.inversion_fail()
     }
 
     /// The missing variables of an evaluation with their scores.

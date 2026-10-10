@@ -151,11 +151,71 @@ impl Operator {
     }
 }
 
+impl Rule {
+    /// A private `$SITUATION` rule, as a sub-engine defines one.
+    pub fn situation(name: NameId, valeur: NodeId) -> Self {
+        Rule {
+            name,
+            private: true,
+            valeur,
+            possibilities: None,
+            parents: Vec::new(),
+            suggestions: Vec::new(),
+            replacements: Vec::new(),
+            question: false,
+            declared_type: None,
+            reports_missing: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PossibilityKind {
     Number,
     String,
     Reference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrancheMechanism {
+    Bareme,
+    Grille,
+    TauxProgressif,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tranche {
+    pub taux: Option<NodeId>,
+    pub montant: Option<NodeId>,
+    pub plafond: NodeId,
+}
+
+/// A `contexte` entry: while the mechanism evaluates, `origin` takes the value of `replacement`.
+#[derive(Debug, Clone)]
+pub struct ContextePair {
+    pub origin: NodeId,
+    pub replacement: NodeId,
+    /// Identifies the replacement as written, to compare situations.
+    pub replacement_key: u64,
+    /// The `$SITUATION` rule giving `origin` a copy of the replacement, and the copy checked
+    /// against the possibilities of `origin`, set once references are resolved.
+    pub situation: Option<(NodeId, Option<NodeId>)>,
+}
+
+/// The rules an `inversion numérique` evaluates its goal with, set once references are resolved.
+#[derive(Debug, Clone)]
+pub struct InversionRules {
+    /// The `$SITUATION` rule of the inverted rule, valued by `input`.
+    pub input_rule: NodeId,
+    pub input: NodeId,
+    /// For each candidate goal, a `$SITUATION` rule leaving it undefined.
+    pub goal_rules: Vec<Option<NodeId>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TextPart {
+    Text(String),
+    Node(NodeId),
 }
 
 #[derive(Debug, Clone)]
@@ -190,14 +250,51 @@ pub enum Node {
         valeur: NodeId,
     },
     SimplifierUnite(NodeId),
+    Arrondi {
+        valeur: NodeId,
+        arrondi: NodeId,
+    },
+    Duree {
+        depuis: NodeId,
+        jusqua: NodeId,
+        unit: Unit,
+    },
+    Logarithme(NodeId),
+    Texte(Vec<TextPart>),
+    Contexte {
+        valeur: NodeId,
+        pairs: Vec<ContextePair>,
+        /// Shared by every copy of the mechanism, to reuse its sub-engine.
+        id: u64,
+    },
+    Inversion {
+        rule: NameId,
+        candidates: Vec<NodeId>,
+        min: f64,
+        max: f64,
+        tolerance: f64,
+        rules: Option<InversionRules>,
+    },
+    ResoudreReferenceCirculaire {
+        rule: NameId,
+        valeur: NodeId,
+        /// The `$SITUATION` rule of the rule and its `input`, set once references are resolved.
+        rules: Option<(NodeId, NodeId)>,
+    },
+    /// The value a sub-engine gives a `$SITUATION` rule while iterating.
+    SituationInput,
+    Tranches {
+        mechanism: TrancheMechanism,
+        assiette: NodeId,
+        multiplicateur: NodeId,
+        tranches: Vec<Tranche>,
+    },
     UnePossibilite {
         kind: PossibilityKind,
         unit: Option<Unit>,
         /// Constants, or references named as written.
         options: Vec<NodeId>,
     },
-    /// A mechanism the engine does not implement yet; evaluating it fails.
-    Unsupported(&'static str),
 }
 
 impl Node {
@@ -207,7 +304,49 @@ impl Node {
         mut map: impl FnMut(NodeId) -> Result<NodeId, E>,
     ) -> Result<Node, E> {
         Ok(match self {
-            Node::Constant(_) | Node::Reference(_) | Node::Unsupported(_) => self.clone(),
+            Node::Constant(_) | Node::Reference(_) | Node::SituationInput => self.clone(),
+            Node::Contexte { valeur, pairs, id } => {
+                let mut mapped = Vec::with_capacity(pairs.len());
+                for pair in pairs {
+                    mapped.push(ContextePair {
+                        origin: map(pair.origin)?,
+                        replacement: map(pair.replacement)?,
+                        ..pair.clone()
+                    });
+                }
+                Node::Contexte {
+                    pairs: mapped,
+                    valeur: map(*valeur)?,
+                    id: *id,
+                }
+            }
+            Node::Inversion {
+                rule,
+                candidates,
+                min,
+                max,
+                tolerance,
+                rules,
+            } => Node::Inversion {
+                rule: *rule,
+                candidates: candidates
+                    .iter()
+                    .map(|&c| map(c))
+                    .collect::<Result<_, _>>()?,
+                min: *min,
+                max: *max,
+                tolerance: *tolerance,
+                rules: rules.clone(),
+            },
+            Node::ResoudreReferenceCirculaire {
+                rule,
+                valeur,
+                rules,
+            } => Node::ResoudreReferenceCirculaire {
+                rule: *rule,
+                valeur: map(*valeur)?,
+                rules: *rules,
+            },
             Node::Rule(rule) => {
                 let suggestions = rule
                     .suggestions
@@ -260,6 +399,54 @@ impl Node {
                 valeur: map(*valeur)?,
             },
             Node::SimplifierUnite(valeur) => Node::SimplifierUnite(map(*valeur)?),
+            Node::Duree {
+                depuis,
+                jusqua,
+                unit,
+            } => Node::Duree {
+                depuis: map(*depuis)?,
+                jusqua: map(*jusqua)?,
+                unit: unit.clone(),
+            },
+            Node::Logarithme(valeur) => Node::Logarithme(map(*valeur)?),
+            Node::Texte(parts) => Node::Texte(
+                parts
+                    .iter()
+                    .map(|part| {
+                        Ok(match part {
+                            TextPart::Text(text) => TextPart::Text(text.clone()),
+                            TextPart::Node(node) => TextPart::Node(map(*node)?),
+                        })
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+            Node::Arrondi { valeur, arrondi } => Node::Arrondi {
+                valeur: map(*valeur)?,
+                arrondi: map(*arrondi)?,
+            },
+            Node::Tranches {
+                mechanism,
+                assiette,
+                multiplicateur,
+                tranches,
+            } => Node::Tranches {
+                mechanism: *mechanism,
+                assiette: map(*assiette)?,
+                multiplicateur: map(*multiplicateur)?,
+                tranches: tranches
+                    .iter()
+                    .map(|t| {
+                        let plafond = map(t.plafond)?;
+                        let montant = t.montant.map(&mut map).transpose()?;
+                        let taux = t.taux.map(&mut map).transpose()?;
+                        Ok(Tranche {
+                            taux,
+                            montant,
+                            plafond,
+                        })
+                    })
+                    .collect::<Result<_, _>>()?,
+            },
             Node::UnePossibilite {
                 kind,
                 unit,
@@ -272,10 +459,19 @@ impl Node {
         })
     }
 
+    pub fn children(&self) -> Vec<NodeId> {
+        let mut children = Vec::new();
+        let _ = self.map_children(|child| {
+            children.push(child);
+            Ok::<_, ()>(child)
+        });
+        children
+    }
+
     /// The `unit` a parsed node carries before evaluation.
     pub fn static_unit(&self) -> Option<&Unit> {
         match self {
-            Node::Unite { unit, .. } => Some(unit),
+            Node::Unite { unit, .. } | Node::Duree { unit, .. } => Some(unit),
             Node::UnePossibilite { unit, .. } => unit.as_ref(),
             Node::Constant(constant) => constant.unit.as_ref(),
             _ => None,
@@ -332,6 +528,8 @@ pub struct Program {
     /// reference it applies to.
     pub replacement_nodes: HashMap<Vec<u32>, NodeId>,
     pub next_replacement_id: u32,
+    /// Today as `dd/mm/yyyy`, the default bounds of `durée`.
+    pub today: String,
 }
 
 impl Program {

@@ -15,6 +15,12 @@ export interface Evaluation {
   missingVariables: Record<string, number>;
 }
 
+function today(): string {
+  const date = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
 type NativeEvaluation =
   | { error: string }
   | {
@@ -28,7 +34,7 @@ export default class Engine {
   #situation: Situation = {};
 
   constructor(rules: Rules = {}) {
-    this.#native = new NativeEngine(JSON.stringify(rules));
+    this.#native = new NativeEngine(JSON.stringify(rules), today());
   }
 
   setSituation(situation: Situation = {}): this {
@@ -40,6 +46,10 @@ export default class Engine {
 
   getSituation(): Situation {
     return this.#situation;
+  }
+
+  inversionFail(): boolean {
+    return this.#native.inversionFail();
   }
 
   evaluate(expression: string): Evaluation {

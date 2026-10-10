@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Branch, NameId, Node, NodeId, Program, Replacement, Value};
+use crate::ast::{Branch, ContextePair, NameId, Node, NodeId, Program, Replacement, Value};
 use crate::collation::locale_compare;
 use crate::error::{Error, ErrorKind, Result};
 use crate::parse::default_constant;
@@ -83,7 +83,29 @@ impl Inliner<'_> {
     fn inline(&mut self, id: NodeId) -> NodeId {
         match self.program.node(id).clone() {
             Node::Reference(_) => self.replace(id),
-            Node::Constant(_) | Node::UnePossibilite { .. } | Node::Unsupported(_) => id,
+            Node::Constant(_)
+            | Node::UnePossibilite { .. }
+            | Node::Inversion { .. }
+            | Node::SituationInput => id,
+            Node::Contexte {
+                valeur,
+                pairs,
+                id: key,
+            } => {
+                let valeur = self.inline(valeur);
+                let pairs = pairs
+                    .into_iter()
+                    .map(|pair| ContextePair {
+                        replacement: self.inline(pair.replacement),
+                        ..pair
+                    })
+                    .collect();
+                self.program.push(Node::Contexte {
+                    valeur,
+                    pairs,
+                    id: key,
+                })
+            }
             other => {
                 let copy = other
                     .map_children(|child| Ok::<_, std::convert::Infallible>(self.inline(child)))

@@ -10,8 +10,6 @@ pub enum ErrorKind {
     PrivateRule,
     Engine,
     Internal,
-    /// A mechanism fast-publicodes does not implement yet.
-    Unsupported,
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +52,6 @@ impl fmt::Display for Error {
             ErrorKind::PrivateRule => "Règle privée",
             ErrorKind::Engine => "EngineError",
             ErrorKind::Internal => "InternalError",
-            ErrorKind::Unsupported => "Non supporté",
         };
         write!(f, "[ {kind} ]")?;
         if let Some(rule) = &self.rule {

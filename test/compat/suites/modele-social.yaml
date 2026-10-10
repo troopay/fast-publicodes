@@ -4,3 +4,6 @@ situations:
   salarié CDI 3000 €:
     salarié . contrat: "'CDI'"
     salarié . contrat . salaire brut: 3000
+  fuzz 1259:
+    salarié . convention collective: "'sport'"
+    salarié . cotisations . exonérations . JEI: oui

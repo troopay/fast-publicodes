@@ -9,7 +9,8 @@ use crate::ast::{NameId, Node, NodeId, Program, rule_parents};
 use crate::error::{Error, Result};
 use crate::parse::Batch;
 use crate::replace::inline_replacements;
-use crate::types::infer_rule_types;
+use crate::sub_engines::prepare_sub_engines;
+use crate::types::{infer_rule_types, infer_types};
 
 /// The rules references resolve against: the defined ones, shadowed by those being added.
 struct Scope<'a> {
@@ -210,5 +211,7 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
         program.define(name, node, overlay);
     }
     infer_rule_types(program, resolved.iter().map(|&(_, node)| node));
+    let prepared = prepare_sub_engines(program, resolved.iter().map(|&(_, node)| node));
+    infer_types(program, prepared);
     Ok(())
 }

@@ -18,6 +18,35 @@ rules:
     durée:
       depuis: date d'embauche
       jusqu'à: date de départ
+  en mois:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: 15/08/2026
+      unité: mois
+  en trimestres:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: 15/08/2026
+      unité: trimestre
+  en trimestres civils:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: 15/08/2026
+      unité: trimestre civil
+  en années civiles:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: 15/08/2026
+      unité: année civile
+  négative:
+    durée:
+      depuis: 01/01/2030
+      jusqu'à: date d'embauche
+  depuis le début:
+    durée:
+      depuis: 01/01/2000
+      jusqu'à: date d'embauche
+      unité: an
 situations:
   vide: {}
   embauche récente:
@@ -25,3 +54,6 @@ situations:
   départ:
     date d'embauche: 01/01/2020
     date de départ: 31/12/2023
+  fin de février:
+    date d'embauche: 29/02/2024
+    date de départ: 28/02/2025

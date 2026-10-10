@@ -30,6 +30,33 @@ fn compute(program: &mut Program, id: NodeId) -> InferredType {
             ty: constant.ty,
         },
         Node::EstNonDefini(_) | Node::EstNonApplicable(_) => boolean,
+        Node::Contexte { valeur, .. } => infer(program, valeur),
+        Node::Inversion { .. }
+        | Node::ResoudreReferenceCirculaire { .. }
+        | Node::SituationInput => InferredType {
+            nullable: Some(false),
+            ty: Some(Type::Number),
+        },
+        Node::Duree { .. } => InferredType {
+            nullable: Some(false),
+            ty: Some(Type::Number),
+        },
+        Node::Texte(_) => InferredType {
+            nullable: Some(false),
+            ty: Some(Type::String),
+        },
+        Node::Logarithme(valeur) => InferredType {
+            nullable: infer(program, valeur).nullable,
+            ty: Some(Type::Number),
+        },
+        Node::Tranches { .. } => InferredType {
+            nullable: Some(false),
+            ty: Some(Type::Number),
+        },
+        Node::Arrondi { valeur, .. } => InferredType {
+            nullable: infer(program, valeur).nullable,
+            ty: Some(Type::Number),
+        },
         Node::Operation { operator, operands } => {
             use Operator::*;
             let nullable = match operator {
@@ -128,7 +155,13 @@ fn compute(program: &mut Program, id: NodeId) -> InferredType {
                 }),
             },
         },
-        Node::Unsupported(_) => InferredType::default(),
+    }
+}
+
+/// Infers the types of the given nodes.
+pub fn infer_types(program: &mut Program, nodes: impl IntoIterator<Item = NodeId>) {
+    for node in nodes {
+        infer(program, node);
     }
 }
 

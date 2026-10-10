@@ -66,6 +66,23 @@ impl Missing {
             .fold(0., |max, &(_, score)| if max > score { max } else { score })
     }
 
+    pub fn contains(&self, name: NameId) -> bool {
+        self.iter().any(|&(n, _)| n == name)
+    }
+
+    pub fn retain(&self, keep: impl Fn(NameId) -> bool) -> Missing {
+        let kept: Vec<(NameId, f64)> = self
+            .iter()
+            .copied()
+            .filter(|&(name, _)| keep(name))
+            .collect();
+        if kept.is_empty() {
+            Missing::default()
+        } else {
+            Missing(Some(Rc::from(kept)))
+        }
+    }
+
     /// `missing[name] = score`.
     pub fn with(&self, name: NameId, score: f64) -> Missing {
         let mut entries: Vec<(NameId, f64)> = self.iter().copied().collect();

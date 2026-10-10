@@ -89,6 +89,104 @@ pub fn timestamp(text: &str) -> Result<f64> {
     Ok(days as f64 * 86_400_000.)
 }
 
+fn parts(text: &str) -> Vec<f64> {
+    text.split('/').map(js_unary_plus).collect()
+}
+
+fn part(parts: &[f64], index: usize) -> f64 {
+    parts.get(index).copied().unwrap_or(f64::NAN)
+}
+
+/// `new Date(year, month, 0).getDate()`: the number of days of a month, 1-based.
+fn days_in_month(year: f64, month: f64) -> f64 {
+    js_local_date(year, month + 1., 0.).map_or(f64::NAN, |last| civil_day_of(last) as f64)
+}
+
+pub fn difference_in_days(from: &str, to: &str) -> Result<f64> {
+    Ok((timestamp(to)? - timestamp(from)?) / 86_400_000.)
+}
+
+pub fn difference_in_months(from: &str, to: &str) -> f64 {
+    let (from, to) = (parts(from), parts(to));
+    let (day_from, month_from, year_from) = (part(&from, 0), part(&from, 1), part(&from, 2));
+    let (day_to, month_to, year_to) = (part(&to, 0), part(&to, 1), part(&to, 2));
+    let full_months = month_to - month_from + 12. * (year_to - year_from);
+    let prorata_from = (day_from - 1.) / days_in_month(year_from, month_from);
+    let prorata_to = day_to / days_in_month(year_to, month_to);
+    full_months - prorata_from + prorata_to
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// Year of a date and whether it is on or after the 1st of March.
+fn year_and_after_march(text: &str) -> Result<(i64, bool)> {
+    let days = (timestamp(text)? / 86_400_000.) as i64;
+    let normalized = normalize_date_string(text)?;
+    let year = parts(&normalized)[2] as i64;
+    let year = if (0..=99).contains(&year) {
+        year + 1900
+    } else {
+        year
+    };
+    Ok((year, days >= days_from_civil(year, 3, 1)))
+}
+
+pub fn difference_in_years(from: &str, to: &str) -> Result<f64> {
+    let days = difference_in_days(from, to)?;
+    let (from_year, from_after_march) = year_and_after_march(from)?;
+    let (to_year, _) = year_and_after_march(to)?;
+    let first = from_year + i64::from(from_after_march);
+    let last = to_year - i64::from(!from_after_march);
+    let leap_years = (first..=last).filter(|&year| is_leap_year(year)).count() as f64;
+    Ok((days - leap_years) / 365.)
+}
+
+fn trimestre_civil(text: &str) -> String {
+    let segments: Vec<&str> = text.split('/').collect();
+    let month: f64 = segments
+        .get(1)
+        .and_then(|m| {
+            let digits: String = m
+                .trim_start()
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+        .unwrap_or(f64::NAN);
+    let start = 3. * ((month - 1.) / 3.).floor() + 1.;
+    let start = if start.is_nan() {
+        "NaN".to_owned()
+    } else {
+        format!("{:02}", start as i64)
+    };
+    format!(
+        "01/{start}/{}",
+        segments.get(2).copied().unwrap_or("undefined")
+    )
+}
+
+pub fn difference_in_trimestres_civils(from: &str, to: &str) -> f64 {
+    (difference_in_months(&trimestre_civil(from), &trimestre_civil(to)) / 3.).floor() + 1.
+}
+
+pub fn difference_in_civil_years(from: &str, to: &str) -> Result<f64> {
+    let year = |text: &str| {
+        let tail: String = text
+            .chars()
+            .rev()
+            .take(4)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("01/{}", crate::js::number_to_string(js_unary_plus(&tail)))
+    };
+    Ok(difference_in_years(&year(from), &year(to))?.floor() + 1.)
+}
+
 /// Whether `text` matches `/^[\d]{2}\/[\d]{2}\/[\d]{4}$/`.
 pub fn is_date_string(text: &str) -> bool {
     let bytes = text.as_bytes();

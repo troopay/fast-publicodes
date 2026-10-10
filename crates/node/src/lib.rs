@@ -15,9 +15,10 @@ pub struct NativeEngine {
 
 #[napi]
 impl NativeEngine {
+    /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`.
     #[napi(constructor)]
-    pub fn new(rules: String) -> Result<Self> {
-        let engine = Engine::new(&parse_json(&rules)?)
+    pub fn new(rules: String, today: String) -> Result<Self> {
+        let engine = Engine::new(&parse_json(&rules)?, &today)
             .map_err(|error| Error::from_reason(error.to_string()))?;
         Ok(Self { engine })
     }
@@ -60,6 +61,11 @@ impl NativeEngine {
         }
         result.set_named_property("missing", External::new(evaluation.missing))?;
         Ok(result)
+    }
+
+    #[napi]
+    pub fn inversion_fail(&self) -> bool {
+        self.engine.inversion_fail()
     }
 
     #[napi(ts_args_type = "missing: unknown")]

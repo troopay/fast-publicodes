@@ -3,13 +3,15 @@
 mod inline;
 mod possibilities;
 mod replacements;
+mod sub_engines;
 
 use std::collections::HashMap;
 
 pub use inline::Templates;
 
 use crate::ast::{
-    Branch, Constant, Node, NodeId, Operator, Program, Reference, Rule, Type, Value, rule_parents,
+    Branch, Constant, Node, NodeId, Operator, Program, Reference, Rule, TextPart, Tranche,
+    TrancheMechanism, Type, Value, rule_parents,
 };
 use crate::error::{Error, ErrorKind, Result};
 use crate::expression::{number, parse_expression};
@@ -60,19 +62,6 @@ const OTHER_MECHANISMS: [&str; 24] = [
     "variable",
     "variations",
     "constant",
-];
-
-const UNSUPPORTED: [&str; 10] = [
-    "contexte",
-    "arrondi",
-    "résoudre la référence circulaire",
-    "logarithme",
-    "inversion numérique",
-    "taux progressif",
-    "barème",
-    "durée",
-    "grille",
-    "texte",
 ];
 
 fn is_mechanism_key(key: &str) -> bool {
@@ -181,9 +170,6 @@ impl<'a> Parser<'a> {
         if let Some(operator) = Operator::from_key(key) {
             return self.parse_operation(operator, value);
         }
-        if let Some(name) = UNSUPPORTED.iter().find(|name| **name == key) {
-            return Ok(self.push(Node::Unsupported(name)));
-        }
         match key {
             "variable manquante" => {
                 let variable = value
@@ -222,6 +208,31 @@ impl<'a> Parser<'a> {
                 let valeur = self.parse(value)?;
                 Ok(self.push(Node::EstNonApplicable(valeur)))
             }
+            "arrondi" => {
+                let valeur = self.parse_field(value, "valeur")?;
+                let arrondi = self.parse_field(value, "arrondi")?;
+                Ok(self.push(Node::Arrondi { valeur, arrondi }))
+            }
+            "contexte" => self.parse_contexte(value),
+            "inversion numérique" => self.parse_inversion(value),
+            "résoudre la référence circulaire" => {
+                let valeur = self.parse_field(value, "valeur")?;
+                let rule = self.program.names.intern(&self.context);
+                Ok(self.push(Node::ResoudreReferenceCirculaire {
+                    rule,
+                    valeur,
+                    rules: None,
+                }))
+            }
+            "durée" => self.parse_duree(value),
+            "logarithme" => {
+                let valeur = self.parse(value)?;
+                Ok(self.push(Node::Logarithme(valeur)))
+            }
+            "texte" => self.parse_texte(value),
+            "barème" => self.parse_tranches(TrancheMechanism::Bareme, value),
+            "grille" => self.parse_tranches(TrancheMechanism::Grille, value),
+            "taux progressif" => self.parse_tranches(TrancheMechanism::TauxProgressif, value),
             "condition" => {
                 let si = self.parse_field(value, "si")?;
                 let alors = self.parse_field(value, "alors")?;
@@ -260,6 +271,102 @@ impl<'a> Parser<'a> {
         Ok(self.push(Node::Operation {
             operator,
             operands: [left, right],
+        }))
+    }
+
+    fn parse_duree(&mut self, value: &Raw) -> Result<NodeId> {
+        let mut bound = |key: &str| match value.get(key) {
+            Some(raw) if !matches!(raw, Raw::Null) => self.parse(raw),
+            _ => {
+                let today = self.program.today.clone();
+                Ok(self.push(Node::Constant(default_constant(Value::String(
+                    today.into(),
+                )))))
+            }
+        };
+        let depuis = bound("depuis")?;
+        let jusqua = bound("jusqu'à")?;
+        let unit = match value.get("unité") {
+            Some(raw) if raw.is_truthy() => {
+                parse_unit(raw.as_str().unwrap_or("")).map_err(|e| e.in_rule(&self.context))?
+            }
+            _ => parse_unit("jour")?,
+        };
+        const UNITS: [&str; 6] = [
+            "mois",
+            "jour",
+            "an",
+            "trimestre",
+            "trimestre civil",
+            "année civile",
+        ];
+        if !unit.denominators.is_empty()
+            || unit.numerators.len() != 1
+            || !UNITS.contains(&unit.numerators[0].as_str())
+        {
+            return Err(self.syntax(format!(
+                "Seules les unités suivantes sont acceptées pour une durée : {}.",
+                UNITS.join(", ")
+            )));
+        }
+        Ok(self.push(Node::Duree {
+            depuis,
+            jusqua,
+            unit,
+        }))
+    }
+
+    /// `texte`: literal text with `{{ expression }}` interpolations.
+    fn parse_texte(&mut self, value: &Raw) -> Result<NodeId> {
+        let text = value.as_str().unwrap_or("");
+        let mut parts = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find("{{") {
+            let Some(length) = rest[start + 2..].find("}}") else {
+                break;
+            };
+            let expression = rest[start + 2..start + 2 + length].trim();
+            parts.push(TextPart::Text(rest[..start].to_owned()));
+            parts.push(TextPart::Node(self.parse(&Raw::str(expression))?));
+            rest = &rest[start + 4 + length..];
+        }
+        parts.push(TextPart::Text(rest.to_owned()));
+        Ok(self.push(Node::Texte(parts)))
+    }
+
+    fn parse_tranches(&mut self, mechanism: TrancheMechanism, value: &Raw) -> Result<NodeId> {
+        let assiette = self.parse_field(value, "assiette")?;
+        let multiplicateur = match value.get("multiplicateur") {
+            Some(raw) if raw.is_truthy() => self.parse(raw)?,
+            _ => self.push(Node::Constant(default_constant(Value::Number(1.)))),
+        };
+        let Some(Raw::List(items)) = value.get("tranches") else {
+            return Err(self.syntax("Les tranches doivent être une liste"));
+        };
+        let mut tranches = Vec::with_capacity(items.len());
+        for item in items {
+            let taux = item.get("taux").map(|raw| self.parse(raw)).transpose()?;
+            let montant = item.get("montant").map(|raw| self.parse(raw)).transpose()?;
+            let plafond = match item.get("plafond") {
+                Some(raw) => self.parse(raw)?,
+                None => self.push(Node::Constant(Constant {
+                    value: Value::Number(f64::INFINITY),
+                    ty: Some(Type::Number),
+                    nullable: Some(false),
+                    unit: None,
+                })),
+            };
+            tranches.push(Tranche {
+                taux,
+                montant,
+                plafond,
+            });
+        }
+        Ok(self.push(Node::Tranches {
+            mechanism,
+            assiette,
+            multiplicateur,
+            tranches,
         }))
     }
 

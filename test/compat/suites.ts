@@ -52,7 +52,12 @@ export async function loadSuites(): Promise<Suite[]> {
             ),
         ),
         candidate: once(() => new Engine(rules)),
-        cacheKey: hash(version, harnessHash, JSON.stringify(rules)),
+        cacheKey: hash(
+          version,
+          harnessHash,
+          new Date().toDateString(),
+          JSON.stringify(rules),
+        ),
       };
     }),
   );
@@ -72,13 +77,26 @@ export function expectedOutcomes(
 export async function cached<T>(key: string, compute: () => T): Promise<T> {
   const path = new URL(`${key}.json`, CACHE_DIR);
   try {
-    return JSON.parse(await readFile(path, "utf8"));
+    return JSON.parse(await readFile(path, "utf8"), reviveNumbers);
   } catch {
     const value = compute();
     await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path, JSON.stringify(value));
+    await writeFile(path, JSON.stringify(value, keepNumbers));
     return value;
   }
+}
+
+/** JSON has no `NaN` or infinities: they are written as `{ "$number": "NaN" }`. */
+function keepNumbers(_key: string, value: unknown) {
+  return typeof value === "number" && !Number.isFinite(value)
+    ? { $number: String(value) }
+    : value;
+}
+
+function reviveNumbers(_key: string, value: unknown) {
+  return value && typeof value === "object" && "$number" in value
+    ? Number(value.$number)
+    : value;
 }
 
 /** Name of the suite situation equal to `situation`, if any. */
