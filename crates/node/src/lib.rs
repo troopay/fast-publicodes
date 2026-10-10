@@ -1,36 +1,24 @@
-use std::rc::Rc;
-
-use fast_publicodes_engine::{
-    Engine, Error as EngineError, ErrorKind, Missing, Options, SituationOptions, Today, UnitKey,
-    Value, Warning,
+use fast_publicodes_engine::{Error as EngineError, Missing, Options, SituationOptions, Value};
+use fast_publicodes_js::{
+    SentWarning, Session, UnitKeyResult, error_json, parse_json, today, unit_key,
 };
 use napi::bindgen_prelude::{Either, External, Function, JsObjectValue, Null, Object, Undefined};
 use napi::{Env, Error, Result};
 use napi_derive::napi;
-use rustc_hash::FxHashMap;
 
-fn parse_json(text: &str) -> Result<serde_json::Value> {
-    serde_json::from_str(text).map_err(|error| Error::from_reason(error.to_string()))
+fn json(text: &str) -> Result<serde_json::Value> {
+    parse_json(text).map_err(Error::from_reason)
 }
 
-fn error_json(error: &EngineError) -> serde_json::Value {
-    serde_json::json!({
-        "name": error.kind.name(),
-        "message": error.to_string(),
-        "dottedName": error.rule.clone().unwrap_or_default(),
-    })
-}
-
-/// `{ error: { name, message, dottedName } }`, from which the package builds a
-/// `PublicodesError`.
+/// `{ error }`, the error as JSON `{ name, message, dottedName }`.
 fn failure<'env>(env: &'env Env, error: &EngineError) -> Result<Object<'env>> {
     let mut result = Object::new(env)?;
-    result.set_named_property("error", error_json(error).to_string())?;
+    result.set_named_property("error", error_json(error))?;
     Ok(result)
 }
 
 /// What `getUnitKey` returns: a key, or what it threw.
-type UnitKeyResult = Either<String, Thrown>;
+type UnitKeyReturn = Either<String, Thrown>;
 
 /// A thrown value: an `Error` and its message, or another value, which the caller keeps.
 #[napi(object)]
@@ -42,7 +30,7 @@ pub struct Thrown {
 fn callback<Args, Return>(
     env: &Env,
     function: Function<Args, Return>,
-) -> Result<impl Fn(Args) -> Result<Return> + 'static>
+) -> Result<impl Fn(Args) -> std::result::Result<Return, String> + 'static>
 where
     Args: napi::bindgen_prelude::JsValuesTupleIntoVec + 'static,
     Return: napi::bindgen_prelude::FromNapiValue + 'static,
@@ -51,34 +39,12 @@ where
     let raw_env = env.raw();
     Ok(move |args| {
         let env = Env::from_raw(raw_env);
-        function.borrow_back(&env)?.call(args)
+        function
+            .borrow_back(&env)
+            .and_then(|function| function.call(args))
+            .map_err(|error| error.reason)
     })
 }
-
-fn unit_key(env: &Env, function: Function<String, UnitKeyResult>) -> Result<UnitKey> {
-    let call = callback(env, function)?;
-    Ok(Rc::new(move |unit: &str| match call(unit.to_owned()) {
-        Ok(Either::A(key)) => Ok(key),
-        Ok(Either::B(Thrown {
-            message: Some(message),
-        })) => Err(EngineError::new(ErrorKind::Plain, message)),
-        Ok(Either::B(Thrown { message: None })) => Err(EngineError::new(
-            ErrorKind::Thrown,
-            "getUnitKey a levé une valeur",
-        )),
-        Err(error) => Err(EngineError::new(ErrorKind::Internal, error.reason)),
-    }))
-}
-
-fn today(env: &Env, function: Function<(), String>) -> Result<Today> {
-    let call = callback(env, function)?;
-    Ok(Rc::new(move || {
-        call(()).map_err(|error| EngineError::new(ErrorKind::Internal, error.reason))
-    }))
-}
-
-/// How many distinct warnings an engine remembers having sent.
-const SENT_WARNINGS: usize = 4096;
 
 /// The engine, taking rules, options and situations as JSON.
 ///
@@ -87,8 +53,7 @@ const SENT_WARNINGS: usize = 4096;
 /// `warningsReset` asks the caller to empty its table first.
 #[napi(js_name = "Engine")]
 pub struct NativeEngine {
-    engine: Engine,
-    sent_warnings: FxHashMap<Warning, u32>,
+    session: Session,
 }
 
 #[napi]
@@ -101,18 +66,34 @@ impl NativeEngine {
         rules: String,
         options: String,
         get_today: Function<(), String>,
-        get_unit_key: Option<Function<String, UnitKeyResult>>,
+        get_unit_key: Option<Function<String, UnitKeyReturn>>,
     ) -> Result<Self> {
-        let options = Options::from_json(&parse_json(&options)?);
-        let unit_key = get_unit_key
-            .map(|function| unit_key(env, function))
-            .transpose()?;
-        let today = today(env, get_today)?;
-        let engine = Engine::new(&parse_json(&rules)?, options, today, unit_key)
-            .map_err(|error| Error::from_reason(error_json(&error).to_string()))?;
+        let options = Options::from_json(&json(&options)?);
+        let unit_key = match get_unit_key {
+            Some(function) => {
+                let call = callback(env, function)?;
+                Some(unit_key(move |unit| {
+                    call(unit.to_owned()).map(|returned| match returned {
+                        Either::A(key) => UnitKeyResult::Key(key),
+                        Either::B(Thrown {
+                            message: Some(message),
+                        }) => UnitKeyResult::Error(message),
+                        Either::B(Thrown { message: None }) => UnitKeyResult::Thrown,
+                    })
+                }))
+            }
+            None => None,
+        };
+        let get_today = callback(env, get_today)?;
+        let engine = fast_publicodes_engine::Engine::new(
+            &json(&rules)?,
+            options,
+            today(move || get_today(())),
+            unit_key,
+        )
+        .map_err(|error| Error::from_reason(error_json(&error)))?;
         Ok(Self {
-            engine,
-            sent_warnings: FxHashMap::default(),
+            session: Session::new(engine),
         })
     }
 
@@ -130,7 +111,11 @@ impl NativeEngine {
             keep_previous,
             strict,
         };
-        let mut result = match self.engine.set_situation(&parse_json(&situation)?, options) {
+        let mut result = match self
+            .session
+            .engine
+            .set_situation(&json(&situation)?, options)
+        {
             Ok(accepted) => {
                 let mut result = Object::new(env)?;
                 result.set_named_property("accepted", accepted)?;
@@ -154,14 +139,14 @@ impl NativeEngine {
         &mut self,
         env: &'env Env,
         expression: String,
-        json: bool,
+        json_expression: bool,
     ) -> Result<Object<'env>> {
-        let value = if json {
-            parse_json(&expression)?
+        let value = if json_expression {
+            json(&expression)?
         } else {
             serde_json::Value::String(expression)
         };
-        let evaluation = match self.engine.evaluate(&value) {
+        let evaluation = match self.session.engine.evaluate(&value) {
             Ok(evaluation) => evaluation,
             Err(error) => {
                 let mut result = failure(env, &error)?;
@@ -195,7 +180,7 @@ impl NativeEngine {
         missing: &External<Missing>,
     ) -> Result<Object<'env>> {
         let mut result = Object::new(env)?;
-        for (name, score) in self.engine.missing_variables(missing) {
+        for (name, score) in self.session.engine.missing_variables(missing) {
             result.set_named_property(name, score)?;
         }
         Ok(result)
@@ -210,56 +195,54 @@ impl NativeEngine {
     }
 
     fn attach_warnings(&mut self, result: &mut Object) -> Result<()> {
-        let warnings = self.engine.take_warnings();
-        if warnings.is_empty() {
+        let Some(sent) = self.session.take_warnings() else {
             return Ok(());
-        }
-        if self.sent_warnings.len() + warnings.len() > SENT_WARNINGS {
-            self.sent_warnings.clear();
+        };
+        if sent.reset {
             result.set_named_property("warningsReset", true)?;
         }
-        let mut sent: Vec<Either<u32, String>> = Vec::with_capacity(warnings.len());
-        for warning in warnings {
-            if let Some(&index) = self.sent_warnings.get(&warning) {
-                sent.push(Either::A(index));
-            } else {
-                sent.push(Either::B(warning.to_string()));
-                let index = self.sent_warnings.len() as u32;
-                self.sent_warnings.insert(warning, index);
-            }
-        }
-        result.set_named_property("warnings", sent)?;
-        Ok(())
+        let warnings: Vec<Either<u32, String>> = sent
+            .warnings
+            .into_iter()
+            .map(|warning| match warning {
+                SentWarning::Index(index) => Either::A(index),
+                SentWarning::Text(text) => Either::B(text),
+            })
+            .collect();
+        result.set_named_property("warnings", warnings)
     }
 
     #[napi]
     pub fn inversion_fail(&self) -> bool {
-        self.engine.inversion_fail()
+        self.session.engine.inversion_fail()
     }
 
     #[napi]
     pub fn reset_cache(&mut self) {
-        self.engine.reset_cache();
+        self.session.engine.reset_cache();
     }
 
     #[napi]
     pub fn shallow_copy(&self, copy_cache: bool) -> NativeEngine {
         NativeEngine {
-            engine: self.engine.shallow_copy(copy_cache),
-            sent_warnings: self.sent_warnings.clone(),
+            session: self.session.shallow_copy(copy_cache),
         }
     }
 
     /// The names of the public rules, in definition order.
     #[napi]
     pub fn rule_names(&self) -> Vec<String> {
-        self.engine.rule_names().map(str::to_owned).collect()
+        self.session
+            .engine
+            .rule_names()
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Returns `{ rule }`, the rule node as JSON, or `{ error }`.
     #[napi]
     pub fn rule<'env>(&self, env: &'env Env, name: String) -> Result<Object<'env>> {
-        match self.engine.rule(&name) {
+        match self.session.engine.rule(&name) {
             Ok(rule) => {
                 let mut result = Object::new(env)?;
                 result.set_named_property("rule", rule.to_string())?;
@@ -277,7 +260,11 @@ impl NativeEngine {
         name: String,
         filter_not_applicable: bool,
     ) -> Result<Object<'env>> {
-        let mut result = match self.engine.possibilities(&name, filter_not_applicable) {
+        let mut result = match self
+            .session
+            .engine
+            .possibilities(&name, filter_not_applicable)
+        {
             Ok(possibilities) => {
                 let mut result = Object::new(env)?;
                 result.set_named_property("possibilities", possibilities.to_string())?;

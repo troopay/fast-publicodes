@@ -2,13 +2,14 @@
 
 ## Project
 
-fast-publicodes is an npm package with the same API and behaviour as `publicodes` 1.x, whose engine is reimplemented in Rust for speed. It targets Node.
+fast-publicodes is an npm package with the same API and behaviour as `publicodes` 1.x, whose engine is reimplemented in Rust for speed. It runs on Node as a native addon and elsewhere, browsers included, as WebAssembly.
 
 ## Architecture
 
 - `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript. `engine/` (rules, situation, evaluation entry points) drives rules through `parse` (raw rules to nodes, inline mechanisms expanded), `resolve` (references), `replace` (`remplace` and `rend non applicable`), `types` (inference), `sub_engines` (rules for `contexte` and inversions) and `evaluate`; it mirrors the `publicodes` source file by file.
 - `crates/node`: napi-rs binding exposing the engine to Node; built into `native/` (addon plus generated JS loader and types).
-- `src/`: the TypeScript package, wrapping the binding behind the `publicodes` API and types; compiled to `dist/`.
+- `crates/wasm`: wasm-bindgen binding with the same interface, built into `wasm/`; `crates/js` holds what both bindings share.
+- `src/`: the TypeScript package, wrapping a binding behind the `publicodes` API and types; compiled to `dist/`. `index.ts` (Node) and `web.ts` (everything else) set the binding, then export `api.ts`.
 
 Rules and evaluation state live in Rust; calls cross the binding in bulk.
 
@@ -18,7 +19,7 @@ Only what an agent needs to place a change correctly. The why is in ADRs.
 
 | Path | Holds |
 | --- | --- |
-| `crates/` | Rust crates: `engine` and `node` (binding) |
+| `crates/` | Rust crates: `engine`, the bindings `node` and `wasm`, and `js`, shared by both |
 | `src/` | TypeScript package source |
 | `test/` | Vitest tests, mirroring `src/` |
 | `test/compat/` | Comparison against `publicodes`; suites (rules and situations) in `suites/` |
@@ -33,12 +34,14 @@ One row per top-level directory; deeper only where the tree alone would not tell
 | --- | --- |
 | `pnpm install` | Install dependencies |
 | `pnpm build:native` | Build the debug addon into `native/`; rerun after Rust changes, before TypeScript tests |
-| `pnpm build` | Release addon and compiled package |
+| `pnpm build:wasm` | Build the WebAssembly module into `wasm/`; rerun after Rust changes, before `pnpm test:wasm` |
+| `pnpm build` | Release addon, WebAssembly module and compiled package |
 | `pnpm lint` | Clippy, rustfmt check, Biome, type check |
 | `pnpm format` | Format Rust and TypeScript |
 | `cargo test -p <crate> [filter]` | Rust tests of one crate, optionally filtered by name |
 | `pnpm bench` | Release build, then benchmarks against `publicodes` on modele-social |
 | `pnpm test [path] [-t <name>]` | Vitest, optionally scoped to a file or directory and to tests whose name matches, e.g. a suite |
+| `pnpm test:wasm [path] [-t <name>]` | The same tests against the WebAssembly module |
 
 Design each command for who runs it: agent-facing commands run without interaction, accept a scope where one applies and print only what an agent needs. Agent-facing commands are listed here, human-facing ones in README.md, shared ones in both.
 

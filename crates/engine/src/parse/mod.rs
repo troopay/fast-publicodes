@@ -122,15 +122,16 @@ impl<'a> Parser<'a> {
         Error::syntax(message).in_rule(&self.context)
     }
 
-    /// How `publicodes` reports an error raised while parsing `mechanism`.
-    fn in_mechanism(&self, mechanism: &str, error: Error) -> Error {
-        match error.kind {
-            ErrorKind::Plain => self.syntax(format!(
-                "➡️ Dans le mécanisme {mechanism}\n{}",
-                error.message
-            )),
-            _ => error.in_rule(&self.context),
-        }
+    /// `parseMecanism`, which reports the JavaScript errors raised while parsing `key` as
+    /// syntax errors.
+    fn parse_mechanism(&mut self, key: &str, value: &Raw) -> Result<NodeId> {
+        self.mechanism(key, value).map_err(|error| {
+            if error.is_plain() {
+                self.syntax(format!("➡️ Dans le mécanisme {key}\n{}", error.message))
+            } else {
+                error
+            }
+        })
     }
 
     pub fn parse(&mut self, raw: &Raw) -> Result<NodeId> {
@@ -185,7 +186,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_mechanism(&mut self, key: &str, value: &Raw) -> Result<NodeId> {
+    fn mechanism(&mut self, key: &str, value: &Raw) -> Result<NodeId> {
         if let Some(operator) = Operator::from_key(key) {
             return self.parse_operation(operator, value);
         }
@@ -212,8 +213,7 @@ impl<'a> Parser<'a> {
                         "➡️ Dans le mécanisme unité\nL'unité doit être une chaîne de caractères",
                     )
                 })?;
-                let unit = parse_unit_with(text, self.program.unit_key.as_ref())
-                    .map_err(|e| self.in_mechanism("unité", e))?;
+                let unit = parse_unit_with(text, self.program.unit_key.as_ref())?;
                 Ok(self.push(Node::Unite {
                     unit: Rc::new(unit),
                     valeur,
@@ -312,9 +312,7 @@ impl<'a> Parser<'a> {
         let depuis = bound("depuis")?;
         let jusqua = bound("jusqu'à")?;
         let unit = match value.get("unité") {
-            Some(raw) if raw.is_truthy() => {
-                parse_unit(raw.as_str().unwrap_or("")).map_err(|e| self.in_mechanism("durée", e))?
-            }
+            Some(raw) if raw.is_truthy() => parse_unit(raw.as_str().unwrap_or(""))?,
             _ => parse_unit("jour")?,
         };
         const UNITS: [&str; 6] = [
@@ -451,10 +449,10 @@ impl<'a> Parser<'a> {
             _ => Value::Undefined,
         };
         let unit = match (ty, value.get("rawUnit").and_then(Raw::as_str)) {
-            (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(
-                parse_unit_with(raw_unit, self.program.unit_key.as_ref())
-                    .map_err(|e| self.in_mechanism("constant", e))?,
-            )),
+            (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(parse_unit_with(
+                raw_unit,
+                self.program.unit_key.as_ref(),
+            )?)),
             _ => None,
         };
         let nullable = Some(matches!(node_value, Value::Null | Value::Undefined));

@@ -1,6 +1,7 @@
 import PublicodesEngine, * as publicodes from "publicodes";
 import { describe, expect, test } from "vitest";
 import * as fast from "../src/index.js";
+import { mulberry32 } from "./compat/fuzz.js";
 
 type Module = typeof fast;
 
@@ -112,8 +113,32 @@ describe("parseExpression", () => {
     "-(3 - 2) / 4 %",
     "1 +",
     "a . (b)",
+    "(",
+    "1 + (",
+    "'a\rb'",
+    "😀",
+    "\" €/a . b'^ . c='",
+    "12/2020 + 1/12/2020",
   ])("%j", (expression) => {
     same((module) => module.parseExpression(expression, "règle"));
+  });
+
+  test("random expressions", () => {
+    const tokens = [
+      ...["a", "b", "é", "$", "x2", "oui", "non", "^", " . ", ".", "_"],
+      ...["1", "0", "12", "3.5", "01/", "1/", "12/2024", "2024", "31/"],
+      ...[" ", "  ", "\u00a0", "\u2028", "\n", "\r", "\t"],
+      ...["'", '"', "(", ")", "-", "+", "*", "**", "/", "//", "!="],
+      ...[">", "<", ">=", "<=", "=", " + ", " * ", " - ", " ** "],
+      ...["€", "%", "°", "p", "{", "}", "«", "²", ",", "😀"],
+    ];
+    const random = mulberry32(1);
+    const pick = () => tokens[Math.floor(random() * tokens.length)];
+    for (let i = 0; i < 20_000; i++) {
+      const length = 1 + Math.floor(random() * 8);
+      const expression = Array.from({ length }, pick).join("");
+      same((module) => [expression, module.parseExpression(expression, "r")]);
+    }
   });
 
   test("capitalise0", () => {

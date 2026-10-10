@@ -63,17 +63,27 @@ export function isPublicodesError<Name extends keyof PublicodesErrorTypes>(
 }
 
 export interface NativeError {
-  name: keyof PublicodesErrorTypes;
+  name: keyof PublicodesErrorTypes | "Error" | "TypeError";
   message: string;
   dottedName: string;
+}
+
+/** Restores the lone high surrogates the engine writes as private use characters. */
+export function restoreSurrogates(text: string): string {
+  return text.replace(/[\u{F0000}-\u{F03FF}]/gu, (c) =>
+    String.fromCharCode(0xd800 + (c.codePointAt(0) as number) - 0xf0000),
+  );
 }
 
 /** The error the engine reports, with the message it already wrote. */
 export function fromNative({
   name,
-  message,
+  message: written,
   dottedName,
-}: NativeError): PublicodesError {
+}: NativeError): Error {
+  const message = restoreSurrogates(written);
+  if (name === "Error") return new Error(message);
+  if (name === "TypeError") return new TypeError(message);
   const info = (dottedName ? { dottedName } : {}) as never;
   const error = new PublicodesError(name, "", info);
   error.message = message;

@@ -1,4 +1,4 @@
-//! JavaScript number semantics the engine reproduces.
+//! JavaScript number and string semantics the engine reproduces.
 
 /// `String(value)` for a JS number.
 pub fn number_to_string(value: f64) -> String {
@@ -13,6 +13,13 @@ pub fn round_to_16_decimals(value: f64) -> f64 {
         return value;
     }
     format!("{value:.16}").parse().unwrap_or(value)
+}
+
+/// The high surrogate of `c`, astral, which a JavaScript string can hold alone but a Rust string
+/// cannot: written as the private use character `U+F0000 + (surrogate - 0xD800)`.
+pub fn lone_high_surrogate(c: char) -> char {
+    let high = c.encode_utf16(&mut [0; 2])[0];
+    char::from_u32(0xF0000 + u32::from(high - 0xD800)).expect("a private use character")
 }
 
 #[cfg(test)]

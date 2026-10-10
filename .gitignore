@@ -3,3 +3,4 @@ dist/
 native/
 target/
 *.node
+/wasm/

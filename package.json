@@ -6,9 +6,17 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "node": "./dist/index.js",
+      "default": "./dist/web.js"
+    }
+  },
   "files": [
     "dist",
-    "native"
+    "native",
+    "wasm"
   ],
   "engines": {
     "node": ">=22"
@@ -18,12 +26,14 @@
     "binaryName": "fast-publicodes"
   },
   "scripts": {
-    "build": "pnpm build:native --release && pnpm build:ts",
+    "build": "pnpm build:native --release && pnpm build:wasm && pnpm build:ts",
     "build:native": "napi build --platform --esm --manifest-path crates/node/Cargo.toml --output-dir native --js index.js --dts index.d.ts",
+    "build:wasm": "cargo build -p fast-publicodes-wasm --target wasm32-unknown-unknown --profile wasm && wasm-bindgen --target web --out-dir wasm --out-name fast_publicodes target/wasm32-unknown-unknown/wasm/fast_publicodes_wasm.wasm",
     "build:ts": "tsc -p tsconfig.build.json",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check && biome check && tsc --noEmit",
     "format": "cargo fmt && biome check --write",
     "test": "vitest run",
+    "test:wasm": "FAST_PUBLICODES_TARGET=wasm vitest run",
     "bench": "pnpm build:native --release && vitest bench --run --reporter=default"
   },
   "devDependencies": {

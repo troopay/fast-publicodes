@@ -1,8 +1,9 @@
 use std::fmt;
 
-/// The kinds of `PublicodesError`, then `Plain`: what `publicodes` raises as a plain JavaScript
-/// `Error`, which the mechanism being parsed reports as a syntax error; and `Thrown`: a value
-/// that is not an `Error`, thrown by a function the engine was given, which aborts the call.
+/// The kinds of `PublicodesError`, then what `publicodes` raises as a plain JavaScript `Error`
+/// (`Plain`) or `TypeError` (`Type`), which the mechanism being parsed reports as a syntax
+/// error; and `Thrown`: a value that is not an `Error`, thrown by a function the engine was
+/// given, which aborts the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
     Syntax,
@@ -13,6 +14,7 @@ pub enum ErrorKind {
     Engine,
     Internal,
     Plain,
+    Type,
     Thrown,
 }
 
@@ -58,6 +60,7 @@ impl ErrorKind {
             ErrorKind::Engine => "EngineError",
             ErrorKind::Internal => "InternalError",
             ErrorKind::Plain | ErrorKind::Thrown => "Error",
+            ErrorKind::Type => "TypeError",
         }
     }
 }
@@ -88,8 +91,18 @@ fn build_message(name: &str, message: &str, rule: Option<&str>, cause: Option<&E
     text
 }
 
+impl Error {
+    /// Whether `publicodes` raises it as a JavaScript error rather than a `PublicodesError`.
+    pub fn is_plain(&self) -> bool {
+        matches!(self.kind, ErrorKind::Plain | ErrorKind::Type)
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_plain() {
+            return f.write_str(&self.message);
+        }
         f.write_str(&build_message(
             self.kind.name(),
             &self.message,

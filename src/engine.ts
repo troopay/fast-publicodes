@@ -1,5 +1,10 @@
-import { Engine as NativeEngine } from "../native/index.js";
-import { fromNative, type NativeError, PublicodesError } from "./error.js";
+import { binding, type NativeEngine } from "./binding.js";
+import {
+  fromNative,
+  type NativeError,
+  PublicodesError,
+  restoreSurrogates,
+} from "./error.js";
 import type {
   EngineOptions,
   EvaluatedNode,
@@ -82,7 +87,7 @@ function createNative(
   }
   const { logger: _, getUnitKey: __, ...serializable } = options;
   try {
-    return new NativeEngine(
+    return new (binding().Engine)(
       JSON.stringify(rules),
       JSON.stringify(serializable),
       today,
@@ -126,8 +131,9 @@ export class Engine<RuleNames extends string = string> {
     if (warningsReset) this.warningTexts = [];
     for (const warning of warnings) {
       if (typeof warning === "string") {
-        this.warningTexts.push(warning);
-        this.logger.warn(warning);
+        const text = restoreSurrogates(warning);
+        this.warningTexts.push(text);
+        this.logger.warn(text);
       } else {
         this.logger.warn(this.warningTexts[warning] as string);
       }

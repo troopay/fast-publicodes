@@ -4,6 +4,8 @@
 
 `test/engine.test.ts` and `test/utils.test.ts` compare the rest of the API the same way, call by call: errors, warnings, options, rule metadata and helpers.
 
+`pnpm test:wasm` runs every test against the WebAssembly module instead of the Node addon.
+
 ## Suites
 
 Each `test/compat/suites/<name>.yaml` is a suite: `rules` holds the rules inline, or the name of a package exporting them (`modele-social`); `situations` maps names to situations.
