@@ -1,7 +1,10 @@
+use std::rc::Rc;
+
 use fast_publicodes_engine::{
-    Engine, Error as EngineError, Missing, Options, SituationOptions, Value, Warning,
+    Engine, Error as EngineError, ErrorKind, Missing, Options, SituationOptions, UnitKey, Value,
+    Warning,
 };
-use napi::bindgen_prelude::{Either, External, JsObjectValue, Null, Object, Undefined};
+use napi::bindgen_prelude::{Either, External, Function, JsObjectValue, Null, Object, Undefined};
 use napi::{Env, Error, Result};
 use napi_derive::napi;
 use rustc_hash::FxHashMap;
@@ -26,6 +29,32 @@ fn failure<'env>(env: &'env Env, error: &EngineError) -> Result<Object<'env>> {
     Ok(result)
 }
 
+/// What `getUnitKey` returns: a key, or the message of the `Error` it threw.
+type UnitKeyResult = Either<String, ThrownError>;
+
+#[napi(object)]
+pub struct ThrownError {
+    pub message: String,
+}
+
+/// `getUnitKey` as the engine calls it, from within calls that come from JavaScript.
+fn unit_key(env: &Env, function: Function<String, UnitKeyResult>) -> Result<UnitKey> {
+    let function = function.create_ref()?;
+    let raw_env = env.raw();
+    Ok(Rc::new(move |unit: &str| {
+        let env = Env::from_raw(raw_env);
+        let message = match function
+            .borrow_back(&env)
+            .and_then(|function| function.call(unit.to_owned()))
+        {
+            Ok(Either::A(key)) => return Ok(key),
+            Ok(Either::B(thrown)) => thrown.message,
+            Err(error) => error.reason,
+        };
+        Err(EngineError::new(ErrorKind::Plain, message))
+    }))
+}
+
 /// How many distinct warnings an engine remembers having sent.
 const SENT_WARNINGS: usize = 4096;
 
@@ -45,9 +74,18 @@ impl NativeEngine {
     /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`. Fails with the error as
     /// JSON `{ name, message, dottedName }`.
     #[napi(constructor)]
-    pub fn new(rules: String, today: String, options: String) -> Result<Self> {
+    pub fn new(
+        env: &Env,
+        rules: String,
+        today: String,
+        options: String,
+        get_unit_key: Option<Function<String, UnitKeyResult>>,
+    ) -> Result<Self> {
         let options = Options::from_json(&parse_json(&options)?);
-        let engine = Engine::new(&parse_json(&rules)?, &today, options)
+        let unit_key = get_unit_key
+            .map(|function| unit_key(env, function))
+            .transpose()?;
+        let engine = Engine::new(&parse_json(&rules)?, &today, options, unit_key)
             .map_err(|error| Error::from_reason(error_json(&error).to_string()))?;
         Ok(Self {
             engine,

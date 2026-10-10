@@ -70,6 +70,7 @@ describe("errors", () => {
     ["syntax error", { a: "1 +" }],
     ["unknown reference", { a: "b" }],
     ["orphan rule", { "a . b": 1 }],
+    ["space after / in a unit", { a: { valeur: 1, unité: "€/ mois" } }],
   ])("%s at construction", (_, ruleSet) => {
     compare(ruleSet, {}, () => null);
   });
@@ -156,6 +157,44 @@ describe("options", () => {
     compare({ e: "e + 1" }, { strict: { noCycleRuntime: true } }, (engine) =>
       value(engine, "e"),
     );
+  });
+
+  describe("getUnitKey", () => {
+    const keys: Record<string, string> = { month: "mois", year: "an" };
+    const translated = {
+      salaire: { valeur: "3000 €/month" },
+      annuel: { valeur: "salaire", unité: "€/year" },
+      prime: { question: "Prime ?", "par défaut": "100 €/month" },
+    };
+    const failing = (unit: string) => {
+      if (unit === "x") throw new Error("Unité refusée");
+      return unit;
+    };
+
+    test("normalizes the units of rules, situations and expressions", () => {
+      compare(
+        translated,
+        { getUnitKey: (unit) => keys[unit] ?? unit },
+        (engine) => [
+          value(engine, "annuel"),
+          engine.setSituation({ prime: "1200 €/year" }).getSituation(),
+          value(engine, "prime + salaire"),
+          value(engine, "annuel / 12 month/year"),
+        ],
+      );
+    });
+
+    test("errors it throws", () => {
+      compare({ a: "1 x" }, { getUnitKey: failing }, () => null);
+      compare(contrat, { getUnitKey: failing }, (engine) =>
+        value(engine, "salaire + 2 x"),
+      );
+      for (const strict of [true, false]) {
+        compare(contrat, { getUnitKey: failing }, (engine) =>
+          engine.setSituation({ salaire: "2 x" }, { strict }).getSituation(),
+        );
+      }
+    });
   });
 
   test("filters possibilities that are not applicable", () => {

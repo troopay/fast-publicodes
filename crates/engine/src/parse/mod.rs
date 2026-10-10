@@ -18,7 +18,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::expression::{number, parse_expression};
 use crate::js::number_to_string;
 use crate::raw::{Entries, Raw};
-use crate::units::parse_unit;
+use crate::units::{parse_unit, parse_unit_with};
 
 /// Mechanisms written alongside a value, in the order they wrap it.
 const CHAINABLE: [&str; 14] = [
@@ -122,6 +122,17 @@ impl<'a> Parser<'a> {
         Error::syntax(message).in_rule(&self.context)
     }
 
+    /// How `publicodes` reports an error raised while parsing `mechanism`.
+    fn in_mechanism(&self, mechanism: &str, error: Error) -> Error {
+        match error.kind {
+            ErrorKind::Plain => self.syntax(format!(
+                "➡️ Dans le mécanisme {mechanism}\n{}",
+                error.message
+            )),
+            _ => error.in_rule(&self.context),
+        }
+    }
+
     pub fn parse(&mut self, raw: &Raw) -> Result<NodeId> {
         match raw {
             Raw::Null => Err(self.syntax(
@@ -201,7 +212,8 @@ impl<'a> Parser<'a> {
                         "➡️ Dans le mécanisme unité\nL'unité doit être une chaîne de caractères",
                     )
                 })?;
-                let unit = parse_unit(text).map_err(|e| e.in_rule(&self.context))?;
+                let unit = parse_unit_with(text, &self.program.unit_keys)
+                    .map_err(|e| self.in_mechanism("unité", e))?;
                 Ok(self.push(Node::Unite {
                     unit: Rc::new(unit),
                     valeur,
@@ -301,7 +313,7 @@ impl<'a> Parser<'a> {
         let jusqua = bound("jusqu'à")?;
         let unit = match value.get("unité") {
             Some(raw) if raw.is_truthy() => {
-                parse_unit(raw.as_str().unwrap_or("")).map_err(|e| e.in_rule(&self.context))?
+                parse_unit(raw.as_str().unwrap_or("")).map_err(|e| self.in_mechanism("durée", e))?
             }
             _ => parse_unit("jour")?,
         };
@@ -440,7 +452,8 @@ impl<'a> Parser<'a> {
         };
         let unit = match (ty, value.get("rawUnit").and_then(Raw::as_str)) {
             (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(
-                parse_unit(raw_unit).map_err(|e| e.in_rule(&self.context))?,
+                parse_unit_with(raw_unit, &self.program.unit_keys)
+                    .map_err(|e| self.in_mechanism("constant", e))?,
             )),
             _ => None,
         };

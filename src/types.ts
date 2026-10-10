@@ -1,4 +1,4 @@
-import type { Unit } from "./units.js";
+import type { GetUnitKey, Unit } from "./units.js";
 
 export type PublicodesExpression = string | number | Record<string, unknown>;
 
@@ -93,4 +93,5 @@ export interface EngineOptions {
   logger?: Logger;
   flag?: FlagOptions;
   warn?: boolean | WarnOptions;
+  getUnitKey?: GetUnitKey;
 }

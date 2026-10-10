@@ -17,17 +17,72 @@ pub struct Unit {
     pub denominators: Vec<String>,
 }
 
-pub fn parse_unit(text: &str) -> Result<Unit> {
-    if text.contains("/ ") {
-        return Err(Error::syntax(format!(
-            "L'unité \"{text}\" ne doit pas contenir d'espace après \"/\""
-        )));
+/// `getUnitKey`: the key a written base unit stands for.
+pub type UnitKey = Rc<dyn Fn(&str) -> Result<String>>;
+
+/// A `getUnitKey`, asked once for each base unit.
+#[derive(Clone, Default)]
+pub struct UnitKeys {
+    key: Option<UnitKey>,
+    known: RefCell<FxHashMap<Box<str>, Rc<str>>>,
+}
+
+impl UnitKeys {
+    pub fn new(key: Option<UnitKey>) -> Self {
+        Self {
+            key,
+            known: RefCell::default(),
+        }
     }
+
+    fn get<'a>(&self, unit: &'a str) -> Result<std::borrow::Cow<'a, str>> {
+        let Some(key) = &self.key else {
+            return Ok(unit.into());
+        };
+        if let Some(known) = self.known.borrow().get(unit) {
+            return Ok(known.to_string().into());
+        }
+        let found = key(unit)?;
+        self.known
+            .borrow_mut()
+            .insert(unit.into(), found.as_str().into());
+        Ok(found.into())
+    }
+}
+
+impl std::fmt::Debug for UnitKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnitKeys").finish_non_exhaustive()
+    }
+}
+
+pub fn parse_unit(text: &str) -> Result<Unit> {
+    parse_unit_with(text, &UnitKeys::default())
+}
+
+/// `parseUnit` with a `getUnitKey`.
+pub fn parse_unit_with(text: &str, keys: &UnitKeys) -> Result<Unit> {
+    if text.contains("/ ") {
+        return Err(Error::new(
+            ErrorKind::Plain,
+            format!("L'unité \"{text}\" ne doit pas contenir d'espace après \"/\""),
+        ));
+    }
+    let split = |part: &str| -> Result<Vec<String>> {
+        let units = part
+            .trim()
+            .split('.')
+            .filter(|unit| !unit.is_empty())
+            .map(|unit| keys.get(unit))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(decompose_power(units.iter().map(|unit| unit.as_ref())))
+    };
     let mut parts = text.split('/');
-    let split =
-        |part: &str| decompose_power(part.trim().split('.').filter(|unit| !unit.is_empty()));
-    let numerators = split(parts.next().unwrap_or(""));
-    let denominators = parts.flat_map(split).collect();
+    let numerators = split(parts.next().unwrap_or(""))?;
+    let mut denominators = Vec::new();
+    for part in parts {
+        denominators.extend(split(part)?);
+    }
     Ok(Unit {
         numerators,
         denominators,

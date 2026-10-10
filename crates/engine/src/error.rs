@@ -1,6 +1,7 @@
 use std::fmt;
 
-/// The kinds of `PublicodesError`.
+/// The kinds of `PublicodesError`, and `Plain`: what `publicodes` raises as a plain JavaScript
+/// `Error`, which the mechanism being parsed reports as a syntax error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
     Syntax,
@@ -10,6 +11,7 @@ pub enum ErrorKind {
     PrivateRule,
     Engine,
     Internal,
+    Plain,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -53,6 +55,7 @@ impl ErrorKind {
             ErrorKind::PrivateRule => "PrivateRule",
             ErrorKind::Engine => "EngineError",
             ErrorKind::Internal => "InternalError",
+            ErrorKind::Plain => "Error",
         }
     }
 }

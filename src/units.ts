@@ -21,9 +21,11 @@ function unitCounts(units: string[]): Map<string, number> {
   return counts;
 }
 
+export type GetUnitKey = (writtenUnit: string) => string;
+
 export function parseUnit(
   text: string,
-  getUnitKey: (writtenUnit: string) => string = (x) => x,
+  getUnitKey: GetUnitKey = (x) => x,
 ): Unit {
   if (text.includes("/ ")) {
     throw new Error(

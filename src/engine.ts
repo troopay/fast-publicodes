@@ -11,7 +11,7 @@ import type {
   RuleNode,
   Situation,
 } from "./types.js";
-import type { Unit } from "./units.js";
+import type { GetUnitKey, Unit } from "./units.js";
 
 /** Warnings as the binding reports them: new ones as text, known ones by index. */
 type NativeWarnings = {
@@ -40,6 +40,18 @@ function today(): string {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+/** `getUnitKey` returning the message of the `Error` it throws, as the binding expects. */
+function reportingErrors(getUnitKey: GetUnitKey) {
+  return (unit: string): string | { message: string } => {
+    try {
+      return getUnitKey(unit);
+    } catch (error) {
+      if (error instanceof Error) return { message: error.message };
+      throw error;
+    }
+  };
+}
+
 function createNative(
   rules: RawPublicodes,
   options: EngineOptions,
@@ -51,12 +63,13 @@ function createNative(
       {},
     );
   }
-  const { logger: _, ...serializable } = options;
+  const { logger: _, getUnitKey, ...serializable } = options;
   try {
     return new NativeEngine(
       JSON.stringify(rules),
       today(),
       JSON.stringify(serializable),
+      getUnitKey && reportingErrors(getUnitKey),
     );
   } catch (error) {
     let details: NativeError | undefined;

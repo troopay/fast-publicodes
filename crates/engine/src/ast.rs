@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use crate::error::{Error, Warning, WarningKind};
 use crate::options::Options;
 use crate::raw::Raw;
-use crate::units::UnitRef;
+use crate::units::{UnitKeys, UnitRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
@@ -658,6 +658,7 @@ pub struct Program {
     /// The base rules in definition order.
     pub rule_order: Vec<NameId>,
     pub source_args: FxHashMap<NodeId, SourceArgs>,
+    pub unit_keys: UnitKeys,
 }
 
 impl Program {

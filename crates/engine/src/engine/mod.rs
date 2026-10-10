@@ -17,7 +17,7 @@ use crate::parse::{Parser, Templates};
 use crate::raw::Raw;
 use crate::replace::applicable_replacements;
 use crate::resolve::{disambiguate, finalize};
-use crate::units::Unit;
+use crate::units::{Unit, UnitKey, UnitKeys};
 
 /// The result of `evaluate`; `Engine::missing_variables` names its missing variables.
 #[derive(Debug, Clone)]
@@ -53,7 +53,12 @@ pub struct Engine {
 
 impl Engine {
     /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`.
-    pub fn new(rules: &Json, today: &str, options: Options) -> Result<Self> {
+    pub fn new(
+        rules: &Json,
+        today: &str,
+        options: Options,
+        unit_key: Option<UnitKey>,
+    ) -> Result<Self> {
         if !rules.is_object() {
             return Err(Error::new(
                 ErrorKind::Engine,
@@ -63,6 +68,7 @@ impl Engine {
         let mut program = Program::default();
         program.options = options;
         program.today = today.to_owned();
+        program.unit_keys = UnitKeys::new(unit_key);
         let templates = Templates::new(&mut program)?;
         let mut parser = Parser::new(&mut program, &templates, "");
         parser.parse_rules(&Raw::from(rules))?;
