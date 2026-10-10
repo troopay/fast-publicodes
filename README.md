@@ -23,5 +23,6 @@ pnpm build:native
 | `pnpm build` | Release addon and compiled package |
 | `pnpm lint` | Lint and type check Rust and TypeScript |
 | `pnpm format` | Format Rust and TypeScript |
-| `pnpm test` | TypeScript tests |
+| `pnpm test` | TypeScript tests, including the comparison against publicodes |
+| `FUZZ_SEED=100 pnpm test test/compat/fuzz.test.ts` | Fuzz new seeds; see [docs/testing.md](docs/testing.md) |
 | `cargo test` | Rust tests |

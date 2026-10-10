@@ -1,0 +1,6 @@
+rules: modele-social
+situations:
+  vide: {}
+  salarié CDI 3000 €:
+    salarié . contrat: "'CDI'"
+    salarié . contrat . salaire brut: 3000

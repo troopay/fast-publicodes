@@ -1,0 +1,71 @@
+rules:
+  salarié:
+    question: Êtes-vous salarié ?
+    par défaut: oui
+  salarié . salaire:
+    question: Quel salaire ?
+    unité: €/mois
+    par défaut: 1500 €/mois
+  salarié . cotisations: salaire * 22%
+  salarié . prime:
+    applicable si: salaire > 2000 €/mois
+    valeur: 100 €/mois
+  salarié . bonus:
+    non applicable si: salaire < 1000 €/mois
+    valeur: 50 €/mois
+  salarié . total:
+    somme:
+      - salaire
+      - prime
+      - bonus
+  indépendant:
+    question: Êtes-vous indépendant ?
+    par défaut: non
+  indépendant . revenu:
+    question: Quel revenu ?
+    unité: €/an
+  indépendant . cotisations: revenu * 45%
+  toutes conditions:
+    toutes ces conditions:
+      - salarié
+      - salarié . salaire > 1000 €/mois
+  une condition:
+    une de ces conditions:
+      - indépendant
+      - salarié . salaire > 3000 €/mois
+  est applicable:
+    est applicable: salarié . prime
+  est non applicable:
+    est non applicable: indépendant . cotisations
+  est défini:
+    est défini: indépendant . revenu
+  est non défini:
+    est non défini: indépendant . revenu
+  variations:
+    variations:
+      - si: salarié . salaire > 3000 €/mois
+        alors: "'haut'"
+      - si: salarié . salaire > 1500 €/mois
+        alors: "'moyen'"
+      - sinon: "'bas'"
+  condition:
+    si: indépendant
+    alors: indépendant . revenu
+    sinon: 0 €/an
+  jamais applicable:
+    applicable si: non
+    valeur: 1
+  référence non applicable: jamais applicable + 1
+situations:
+  vide: {}
+  salaire élevé:
+    salarié . salaire: 3500
+  salaire bas:
+    salarié . salaire: 800
+  indépendant:
+    salarié: non
+    indépendant: oui
+    indépendant . revenu: 40000
+  indépendant sans revenu:
+    salarié: non
+    indépendant: oui

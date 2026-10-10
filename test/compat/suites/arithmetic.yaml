@@ -1,0 +1,59 @@
+rules:
+  entier: 12
+  décimal: 2.5
+  négatif: -4
+  addition: entier + décimal
+  soustraction: entier - décimal
+  multiplication: entier * décimal
+  division: entier / décimal
+  division par zéro: entier / 0
+  puissance: 2 ** 10
+  priorité: 1 + 2 * 3 - 4 / 2
+  parenthèses: (1 + 2) * (3 - 4)
+  pourcentage: 10% * 250
+  prix:
+    valeur: 120
+    unité: €
+  quantité:
+    valeur: 3
+    unité: article
+  prix unitaire: prix / quantité
+  total: prix unitaire * quantité
+  salaire:
+    valeur: 2000
+    unité: €/mois
+  salaire annuel:
+    valeur: salaire
+    unité: €/an
+  conversion inline: salaire * 12 mois
+  heures:
+    valeur: 90
+    unité: minute
+  heures en heure:
+    valeur: heures
+    unité: heure
+  comparaison: entier > décimal
+  égalité: entier = 12
+  différence: entier != 12
+  question nombre:
+    question: Combien ?
+    par défaut: 5
+  question avec unité:
+    question: Combien d'euros ?
+    unité: €
+    par défaut: 100
+  calcul sur question: question nombre * question avec unité
+  question sans défaut:
+    question: Quel montant ?
+    unité: €
+  dépend de question sans défaut: question sans défaut + 1 €
+situations:
+  vide: {}
+  questions remplies:
+    question nombre: 7
+    question avec unité: 250
+    question sans défaut: 40
+  zéros:
+    question nombre: 0
+    question avec unité: 0
+    question sans défaut: 0

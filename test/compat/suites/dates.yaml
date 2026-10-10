@@ -1,0 +1,27 @@
+rules:
+  date d'embauche:
+    question: Date d'embauche ?
+    type: date
+    par défaut: 01/03/2024
+  date de départ:
+    question: Date de départ ?
+    type: date
+  après 2025: date d'embauche >= 01/01/2025
+  ancienneté:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: 01/01/2026
+  ancienneté en années:
+    valeur: ancienneté
+    unité: an
+  ancienneté jusqu'au départ:
+    durée:
+      depuis: date d'embauche
+      jusqu'à: date de départ
+situations:
+  vide: {}
+  embauche récente:
+    date d'embauche: 15/06/2025
+  départ:
+    date d'embauche: 01/01/2020
+    date de départ: 31/12/2023

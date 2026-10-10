@@ -21,6 +21,7 @@ Only what an agent needs to place a change correctly. The why is in ADRs.
 | `crates/` | Rust crates: `engine` and `node` (binding) |
 | `src/` | TypeScript package source |
 | `test/` | Vitest tests, mirroring `src/` |
+| `test/compat/` | Comparison against `publicodes`; suites (rules and situations) in `suites/` |
 | `docs/` | Documentation and ADRs |
 
 One row per top-level directory; deeper only where the tree alone would not tell an agent where a change belongs.
@@ -35,7 +36,7 @@ One row per top-level directory; deeper only where the tree alone would not tell
 | `pnpm lint` | Clippy, rustfmt check, Biome, type check |
 | `pnpm format` | Format Rust and TypeScript |
 | `cargo test -p <crate> [filter]` | Rust tests of one crate, optionally filtered by name |
-| `pnpm test [path]` | Vitest, optionally scoped to a file or directory |
+| `pnpm test [path] [-t <name>]` | Vitest, optionally scoped to a file or directory and to tests whose name matches, e.g. a suite |
 
 Design each command for who runs it: agent-facing commands run without interaction, accept a scope where one applies and print only what an agent needs. Agent-facing commands are listed here, human-facing ones in README.md, shared ones in both.
 
@@ -92,6 +93,7 @@ Every document except ADRs is listed here. Read one only when the task needs it.
 
 | Document | Covers |
 | --- | --- |
+| `docs/testing.md` | Compatibility suites, fuzzing and turning fuzz failures into regressions |
 
 ## ADR
 

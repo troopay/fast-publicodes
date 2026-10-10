@@ -1,0 +1,82 @@
+rules:
+  revenu:
+    question: Quel revenu ?
+    unité: €/an
+    par défaut: 30000 €/an
+  plafond sécurité sociale:
+    valeur: 47100 €/an
+  somme:
+    somme:
+      - revenu
+      - 1000 €/an
+  produit:
+    produit:
+      - revenu
+      - 10%
+  minimum:
+    le minimum de:
+      - revenu
+      - plafond sécurité sociale
+  maximum:
+    le maximum de:
+      - revenu
+      - plafond sécurité sociale
+  plafond:
+    valeur: revenu
+    plafond: plafond sécurité sociale
+  plancher:
+    valeur: revenu
+    plancher: 40000 €/an
+  arrondi:
+    valeur: revenu / 7
+    arrondi: oui
+  arrondi décimales:
+    valeur: revenu / 7
+    arrondi: 2 décimales
+  abattement:
+    valeur: revenu
+    abattement: 10%
+  barème:
+    barème:
+      assiette: revenu
+      tranches:
+        - taux: 0%
+          plafond: 10000 €/an
+        - taux: 11%
+          plafond: 26000 €/an
+        - taux: 30%
+          plafond: 75000 €/an
+        - taux: 41%
+  grille:
+    grille:
+      assiette: revenu
+      tranches:
+        - montant: 100 €/an
+          plafond: 20000 €/an
+        - montant: 200 €/an
+          plafond: 50000 €/an
+        - montant: 300 €/an
+  taux progressif:
+    taux progressif:
+      assiette: revenu
+      tranches:
+        - taux: 10%
+          plafond: 20000 €/an
+        - taux: 0%
+          plafond: 60000 €/an
+  par défaut:
+    valeur: revenu
+    par défaut: 0 €/an
+  contexte:
+    valeur: somme
+    contexte:
+      revenu: 50000 €/an
+  texte: "'bonjour'"
+situations:
+  vide: {}
+  revenu nul:
+    revenu: 0
+  revenu moyen:
+    revenu: 45000
+  revenu élevé:
+    revenu: 120000

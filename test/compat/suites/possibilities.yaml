@@ -1,0 +1,35 @@
+rules:
+  contrat:
+    question: Quel contrat ?
+    une possibilité:
+      - CDI
+      - CDD
+      - stage
+    par défaut: "'CDI'"
+  contrat . CDI:
+  contrat . CDD:
+  contrat . stage:
+  durée:
+    question: Quelle durée ?
+    unité: mois
+    applicable si: contrat = 'CDD'
+  indemnité:
+    applicable si: contrat = 'CDD'
+    valeur: 10% * 2000 € * durée / 1 mois
+  gratification:
+    applicable si: contrat = 'stage'
+    valeur: 600 €
+  libellé:
+    variations:
+      - si: contrat = 'CDI'
+        alors: "'permanent'"
+      - sinon: "'temporaire'"
+situations:
+  vide: {}
+  CDD:
+    contrat: "'CDD'"
+    durée: 6
+  CDD sans durée:
+    contrat: "'CDD'"
+  stage:
+    contrat: "'stage'"
