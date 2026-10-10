@@ -1,6 +1,7 @@
 //! Evaluation of nodes, cached for the current situation.
 
 mod arrondi;
+mod cache;
 mod condition;
 mod dates;
 mod js_value;
@@ -12,18 +13,19 @@ mod tranches;
 mod units;
 mod variations;
 
-use std::collections::HashMap;
-use std::rc::Rc;
+use rustc_hash::FxHashMap;
 
 pub use condition::Branch;
 pub use js_value::to_number;
 pub use missing::Missing;
 pub use operation::Operand;
 
+use cache::Cache;
+
 use crate::ast::{NameId, Node, NodeId, PossibilityKind, Program, TextPart, Value};
 use crate::error::{Error, ErrorKind, Result};
 use crate::format::format_value;
-use crate::units::Unit;
+use crate::units::{Unit, UnitRef};
 
 /// The `unit` key of an evaluated node: absent, present but undefined, or set.
 #[derive(Debug, Clone, Default)]
@@ -31,11 +33,15 @@ pub enum UnitSlot {
     #[default]
     Absent,
     Undefined,
-    Set(Rc<Unit>),
+    Set(UnitRef),
 }
 
 impl UnitSlot {
-    pub fn get(&self) -> Option<&Unit> {
+    pub fn unit(&self) -> Option<&Unit> {
+        self.get().map(|unit| &**unit)
+    }
+
+    pub fn get(&self) -> Option<&UnitRef> {
         match self {
             UnitSlot::Set(unit) => Some(unit),
             _ => None,
@@ -43,13 +49,13 @@ impl UnitSlot {
     }
 
     /// `{ unit: value }`: the key is present even when the value is undefined.
-    pub fn present(unit: Option<Unit>) -> Self {
-        unit.map_or(UnitSlot::Undefined, |unit| UnitSlot::Set(Rc::new(unit)))
+    pub fn present(unit: Option<UnitRef>) -> Self {
+        unit.map_or(UnitSlot::Undefined, UnitSlot::Set)
     }
 
     /// `...(unit ? { unit } : {})`.
-    pub fn if_defined(unit: Option<Unit>) -> Self {
-        unit.map_or(UnitSlot::Absent, |unit| UnitSlot::Set(Rc::new(unit)))
+    pub fn if_defined(unit: Option<UnitRef>) -> Self {
+        unit.map_or(UnitSlot::Absent, UnitSlot::Set)
     }
 }
 
@@ -73,15 +79,15 @@ impl Evaluated {
 /// The state of an engine for its situation: caches, stacks and sub-engines.
 #[derive(Debug, Default)]
 pub struct EvalState {
-    cache: Vec<Option<Evaluated>>,
+    cache: Cache,
     rule_stack: Vec<NameId>,
     parent_stack: Vec<NameId>,
     /// Rules the situations of enclosing sub-engines define, innermost last.
-    layers: Vec<HashMap<NameId, NodeId>>,
+    layers: Vec<FxHashMap<NameId, NodeId>>,
     /// The values sub-engines give their `SituationInput` nodes.
-    inputs: HashMap<NodeId, Evaluated>,
+    inputs: FxHashMap<NodeId, Evaluated>,
     /// The sub-engine of each `contexte`, by mechanism.
-    sub_engines: HashMap<u64, EvalState>,
+    sub_engines: FxHashMap<u64, EvalState>,
     /// The amended situation this sub-engine evaluates a `contexte` in.
     contexte_situation: Option<Vec<(NameId, u64)>>,
     inversion_fail: bool,
@@ -107,13 +113,14 @@ impl EvalState {
         self.inversion_fail
     }
 
-    /// `shallowCopy`: a sub-engine seeing the same rules, with this cache if `copy_cache`.
+    /// `shallowCopy`: a sub-engine seeing the same rules, with a copy of this cache if
+    /// `copy_cache`.
     fn fork(&self, copy_cache: bool) -> EvalState {
         EvalState {
             cache: if copy_cache {
-                self.cache.clone()
+                self.cache.snapshot()
             } else {
-                Vec::new()
+                Cache::default()
             },
             layers: self.layers.clone(),
             inputs: self.inputs.clone(),
@@ -129,9 +136,6 @@ pub struct Evaluator<'a> {
 
 impl<'a> Evaluator<'a> {
     pub fn new(program: &'a Program, state: &'a mut EvalState) -> Self {
-        if state.cache.len() < program.nodes.len() {
-            state.cache.resize(program.nodes.len(), None);
-        }
         Self { program, state }
     }
 
@@ -146,7 +150,7 @@ impl<'a> Evaluator<'a> {
     }
 
     fn cached(&self, id: NodeId) -> Option<&Evaluated> {
-        self.state.cache[id.0 as usize].as_ref()
+        self.state.cache.get(id)
     }
 
     pub fn evaluate(&mut self, id: NodeId) -> Result<Evaluated> {
@@ -154,7 +158,7 @@ impl<'a> Evaluator<'a> {
             return Ok(evaluated.clone());
         }
         let evaluated = self.compute(id)?;
-        self.state.cache[id.0 as usize] = Some(evaluated.clone());
+        self.state.cache.insert(id, evaluated.clone());
         Ok(evaluated)
     }
 
@@ -235,7 +239,7 @@ impl<'a> Evaluator<'a> {
                         TextPart::Text(literal) => text.push_str(literal),
                         TextPart::Node(node) => {
                             let evaluated = self.evaluate(*node)?;
-                            text.push_str(&format_value(&evaluated.value, evaluated.unit.get())?);
+                            text.push_str(&format_value(&evaluated.value, evaluated.unit.unit())?);
                             missing = missing.merge(&evaluated.missing);
                         }
                     }

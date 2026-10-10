@@ -5,14 +5,14 @@ use crate::date::{
     difference_in_trimestres_civils, difference_in_years,
 };
 use crate::error::{Error, Result};
-use crate::units::Unit;
+use crate::units::UnitRef;
 
 impl Evaluator<'_> {
     pub(super) fn duree(
         &mut self,
         depuis: NodeId,
         jusqua: NodeId,
-        unit: &Unit,
+        unit: &UnitRef,
     ) -> Result<Evaluated> {
         let from = self.evaluate(depuis)?;
         let to = self.evaluate(jusqua)?;

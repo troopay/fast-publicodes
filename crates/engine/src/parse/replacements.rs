@@ -14,7 +14,7 @@ impl Parser<'_> {
         let items = match raw {
             Some(raw) if !raw.is_truthy() => return Ok(Vec::new()),
             None => return Ok(Vec::new()),
-            Some(Raw::List(items)) => items.clone(),
+            Some(Raw::List(items)) => items.as_ref().clone(),
             Some(single) => vec![single.clone()],
         };
         items
@@ -36,7 +36,7 @@ impl Parser<'_> {
                         );
                     }
                 };
-                let definition = self.parse(&Raw::String(self.context.clone()))?;
+                let definition = self.parse(&Raw::str(&self.context))?;
                 let id = self.program.next_replacement_id;
                 self.program.next_replacement_id += 1;
                 Ok(Replacement {

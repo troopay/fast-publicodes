@@ -204,7 +204,7 @@ impl<'a> Parser<'a> {
             }
             _ if self.is_next(&GRAMMAR.date) => {
                 let text = self.expect_regex(&GRAMMAR.date, "Une date")?;
-                Ok(constant("date", Raw::String(date_value(text)?)))
+                Ok(constant("date", Raw::String(date_value(text)?.into())))
             }
             Some(c) if c.is_ascii_digit() => {
                 let text = self.expect_regex(&GRAMMAR.number, "Un nombre")?;
@@ -264,7 +264,7 @@ pub fn number(value: f64) -> Raw {
 }
 
 fn binary(operator: &str, left: Raw, right: Raw) -> Raw {
-    Raw::map([(operator, Raw::List(vec![left, right]))])
+    Raw::map([(operator, Raw::list(vec![left, right]))])
 }
 
 /// Whether `expression` parses to a single reference, written as `name`.

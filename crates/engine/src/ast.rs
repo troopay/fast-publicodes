@@ -1,9 +1,9 @@
 //! Parsed rules: an arena of nodes, the rule names and the table of rule definitions.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
-use crate::units::Unit;
+use crate::units::UnitRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
@@ -47,7 +47,7 @@ pub struct Constant {
     pub ty: Option<Type>,
     /// `isNullable` when the constant carries it.
     pub nullable: Option<bool>,
-    pub unit: Option<Unit>,
+    pub unit: Option<UnitRef>,
 }
 
 impl Constant {
@@ -84,6 +84,10 @@ pub struct Rule {
     pub declared_type: Option<Type>,
     /// Whether an undefined value reports the rule itself as missing.
     pub reports_missing: bool,
+    /// Whether the rule is the `$SITUATION` of another.
+    pub is_situation: bool,
+    /// The name of the rule's `$SITUATION` rule.
+    pub situation: Option<NameId>,
 }
 
 /// A `remplace` or `rend non applicable` entry; its nodes are references.
@@ -165,6 +169,8 @@ impl Rule {
             question: false,
             declared_type: None,
             reports_missing: false,
+            is_situation: true,
+            situation: None,
         }
     }
 }
@@ -246,7 +252,7 @@ pub enum Node {
         valeur: NodeId,
     },
     Unite {
-        unit: Unit,
+        unit: UnitRef,
         valeur: NodeId,
     },
     SimplifierUnite(NodeId),
@@ -257,7 +263,7 @@ pub enum Node {
     Duree {
         depuis: NodeId,
         jusqua: NodeId,
-        unit: Unit,
+        unit: UnitRef,
     },
     Logarithme(NodeId),
     Texte(Vec<TextPart>),
@@ -291,7 +297,7 @@ pub enum Node {
     },
     UnePossibilite {
         kind: PossibilityKind,
-        unit: Option<Unit>,
+        unit: Option<UnitRef>,
         /// Constants, or references named as written.
         options: Vec<NodeId>,
     },
@@ -459,17 +465,73 @@ impl Node {
         })
     }
 
+    /// The children, in the order `map_children` visits them.
     pub fn children(&self) -> Vec<NodeId> {
         let mut children = Vec::new();
-        let _ = self.map_children(|child| {
-            children.push(child);
-            Ok::<_, ()>(child)
-        });
+        match self {
+            Node::Constant(_) | Node::Reference(_) | Node::SituationInput => {}
+            Node::Contexte { valeur, pairs, .. } => {
+                for pair in pairs {
+                    children.extend([pair.origin, pair.replacement]);
+                }
+                children.push(*valeur);
+            }
+            Node::Inversion { candidates, .. } => children.extend(candidates),
+            Node::Rule(rule) => {
+                children.extend(&rule.suggestions);
+                children.extend(rule.possibilities);
+                children.extend(&rule.parents);
+                children.push(rule.valeur);
+            }
+            Node::Operation { operands, .. } => children.extend(operands),
+            Node::Condition { si, alors, sinon } => children.extend([*si, *alors, *sinon]),
+            Node::Variations(branches) => {
+                for branch in branches {
+                    children.extend([branch.condition, branch.consequence]);
+                }
+            }
+            Node::EstNonDefini(valeur)
+            | Node::EstNonApplicable(valeur)
+            | Node::VariableManquante { valeur, .. }
+            | Node::Unite { valeur, .. }
+            | Node::SimplifierUnite(valeur)
+            | Node::Logarithme(valeur)
+            | Node::ResoudreReferenceCirculaire { valeur, .. } => children.push(*valeur),
+            Node::Duree { depuis, jusqua, .. } => children.extend([*depuis, *jusqua]),
+            Node::Texte(parts) => children.extend(parts.iter().filter_map(|part| match part {
+                TextPart::Node(node) => Some(*node),
+                TextPart::Text(_) => None,
+            })),
+            Node::Arrondi { valeur, arrondi } => children.extend([*valeur, *arrondi]),
+            Node::Tranches {
+                assiette,
+                multiplicateur,
+                tranches,
+                ..
+            } => {
+                children.extend([*assiette, *multiplicateur]);
+                for tranche in tranches {
+                    children.push(tranche.plafond);
+                    children.extend(tranche.montant);
+                    children.extend(tranche.taux);
+                }
+            }
+            Node::UnePossibilite { options, .. } => children.extend(options),
+        }
         children
     }
 
+    /// A copy of the node with its children replaced, in `children` order.
+    pub fn with_children(&self, children: Vec<NodeId>) -> Node {
+        let mut children = children.into_iter();
+        self.map_children(|_| {
+            Ok::<_, std::convert::Infallible>(children.next().expect("one child per child"))
+        })
+        .unwrap_or_else(|never| match never {})
+    }
+
     /// The `unit` a parsed node carries before evaluation.
-    pub fn static_unit(&self) -> Option<&Unit> {
+    pub fn static_unit(&self) -> Option<&UnitRef> {
         match self {
             Node::Unite { unit, .. } | Node::Duree { unit, .. } => Some(unit),
             Node::UnePossibilite { unit, .. } => unit.as_ref(),
@@ -488,7 +550,7 @@ pub struct InferredType {
 #[derive(Debug, Default, Clone)]
 pub struct Names {
     list: Vec<String>,
-    ids: HashMap<String, NameId>,
+    ids: FxHashMap<String, NameId>,
 }
 
 impl Names {
@@ -521,12 +583,12 @@ pub struct Program {
     /// Rule node of each name in the base rules.
     base_rules: Vec<Option<NodeId>>,
     /// Rules defined by the current situation and evaluations, shadowing the base ones.
-    overlay: HashMap<NameId, NodeId>,
+    overlay: FxHashMap<NameId, NodeId>,
     /// Replacements of the base rules, by replaced rule.
-    pub replacements: HashMap<NameId, Vec<Replacement>>,
+    pub replacements: FxHashMap<NameId, Vec<Replacement>>,
     /// The node each set of applicable replacements turns a reference into, shared by every
     /// reference it applies to.
-    pub replacement_nodes: HashMap<Vec<u32>, NodeId>,
+    pub replacement_nodes: FxHashMap<Vec<u32>, NodeId>,
     pub next_replacement_id: u32,
     /// Today as `dd/mm/yyyy`, the default bounds of `durée`.
     pub today: String,

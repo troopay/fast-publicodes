@@ -4,7 +4,9 @@ use super::js_value::{to_number, truthy};
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
 use crate::error::Result;
-use crate::units::{Unit, check_convertible, convert_unit, simplify_unit};
+use std::rc::Rc;
+
+use crate::units::{Unit, UnitRef, check_convertible, convert_unit, simplify_unit};
 
 /// `convertUnit` for any value.
 fn convert_value(from: Option<&Unit>, to: Option<&Unit>, value: &Value) -> Result<Value> {
@@ -17,9 +19,11 @@ fn convert_value(from: Option<&Unit>, to: Option<&Unit>, value: &Value) -> Resul
 
 impl Evaluator<'_> {
     /// `convertNodeToUnit`.
-    pub(super) fn convert_node(&self, to: Option<&Unit>, node: &Evaluated) -> Result<Evaluated> {
-        let value = match (&node.value, node.unit.get()) {
-            (Value::Number(n), Some(from)) => Value::Number(convert_unit(Some(from), to, *n)?),
+    pub(super) fn convert_node(&self, to: Option<&UnitRef>, node: &Evaluated) -> Result<Evaluated> {
+        let value = match (&node.value, node.unit.unit()) {
+            (Value::Number(n), Some(from)) => {
+                Value::Number(convert_unit(Some(from), to.map(|u| &**u), *n)?)
+            }
             (value, _) => value.clone(),
         };
         Ok(Evaluated {
@@ -29,11 +33,11 @@ impl Evaluator<'_> {
         })
     }
 
-    pub(super) fn unite(&mut self, unit: &Unit, valeur: NodeId) -> Result<Evaluated> {
+    pub(super) fn unite(&mut self, unit: &UnitRef, valeur: NodeId) -> Result<Evaluated> {
         let valeur = self.evaluate(valeur)?;
         let mut value = valeur.value.clone();
         if value != Value::Null
-            && let Ok(converted) = convert_value(valeur.unit.get(), Some(unit), &value)
+            && let Ok(converted) = convert_value(valeur.unit.unit(), Some(unit), &value)
         {
             value = converted;
         }
@@ -55,7 +59,12 @@ impl Evaluator<'_> {
                 ..valeur
             });
         };
-        let unit = simplify_unit(&from);
+        let simplified = simplify_unit(&from);
+        let unit = if simplified == *from {
+            from.clone()
+        } else {
+            Rc::new(simplified)
+        };
         let value = match valeur.value {
             Value::Number(n) => Value::Number(convert_unit(Some(&from), Some(&unit), n)?),
             value => value,

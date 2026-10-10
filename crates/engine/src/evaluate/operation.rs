@@ -5,7 +5,9 @@ use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Operator, Value};
 use crate::date::{is_date_string, timestamp};
 use crate::error::{Error, Result};
-use crate::units::{Unit, UnitOperator, infer_unit, serialize_unit};
+use std::rc::Rc;
+
+use crate::units::{Unit, UnitOperator, UnitRef, infer_unit, is_percent};
 
 /// An operand: a node, or a value built by the engine.
 pub enum Operand {
@@ -28,11 +30,11 @@ fn unit_operator(operator: Operator) -> Option<UnitOperator> {
     }
 }
 
-fn per_percent() -> Unit {
-    Unit {
+fn per_percent() -> UnitRef {
+    Rc::new(Unit {
         numerators: Vec::new(),
         denominators: vec!["%".to_owned()],
-    }
+    })
 }
 
 /// The JS operator applied to two defined values.
@@ -145,8 +147,8 @@ impl Evaluator<'_> {
         let missing = left.missing.merge(&right.missing);
         let undefined = left.value == Value::Undefined || right.value == Value::Undefined;
         let with_percentage = matches!(operator, Plus | Minus)
-            && serialize_unit(right.unit.get()).as_deref() == Some("%")
-            && serialize_unit(left.unit.get()).as_deref() != Some("%");
+            && is_percent(right.unit.unit())
+            && !is_percent(left.unit.unit());
         if !undefined && !matches!(operator, Divide | Times | IntegerDivide) && !with_percentage {
             if let Some(unit) = left.unit.get().cloned() {
                 if !matches!(right.unit, UnitSlot::Absent)

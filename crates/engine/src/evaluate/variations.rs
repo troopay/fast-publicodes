@@ -1,12 +1,12 @@
 use super::{Evaluated, Evaluator, Missing, UnitSlot};
 use crate::ast::{Branch, Value};
 use crate::error::Result;
-use crate::units::Unit;
+use crate::units::UnitRef;
 
 impl Evaluator<'_> {
     pub(super) fn variations(&mut self, branches: &[Branch]) -> Result<Evaluated> {
         let mut value = Value::Null;
-        let mut unit: Option<Unit> = None;
+        let mut unit: Option<UnitRef> = None;
         // `None` is JS `undefined`: a previous condition could not be evaluated.
         let mut previous = Some(false);
         let mut missing = Missing::default();

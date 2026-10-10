@@ -7,6 +7,8 @@ use crate::ast::{ContextePair, Node, NodeId};
 use crate::collation::locale_compare;
 use crate::error::Result;
 use crate::evaluate::to_number;
+use std::rc::Rc;
+
 use crate::raw::Raw;
 
 fn fingerprint(context: &str, parts: &[(&str, &Raw)]) -> u64 {
@@ -24,14 +26,14 @@ impl Parser<'_> {
         let valeur = self.parse_field(value, "valeur")?;
         let entries = match value.get("contexte") {
             Some(Raw::Map(entries)) => entries.clone(),
-            _ => Vec::new(),
+            _ => Rc::default(),
         };
         let mut pairs = Vec::with_capacity(entries.len());
-        for (name, replacement) in &entries {
+        for (name, replacement) in entries.iter() {
             let origin = self.parse(&Raw::str(name))?;
             let parsed = self.parse(replacement)?;
             pairs.push((
-                name.as_str(),
+                &**name,
                 replacement,
                 ContextePair {
                     origin,
@@ -57,7 +59,7 @@ impl Parser<'_> {
         let number = |key: &str, default: f64| match value {
             Raw::Map(_) => value.get(key).map_or(default, |raw| match raw {
                 Raw::Number(n) => *n,
-                Raw::String(s) => to_number(&crate::ast::Value::String(s.as_str().into())),
+                Raw::String(s) => to_number(&crate::ast::Value::String(s.clone())),
                 _ => f64::NAN,
             }),
             _ => default,
@@ -72,7 +74,7 @@ impl Parser<'_> {
             other => other.clone(),
         };
         let items = match avec {
-            Raw::List(items) => items,
+            Raw::List(items) => items.as_ref().clone(),
             single => vec![single],
         };
         let mut candidates = Vec::with_capacity(items.len());

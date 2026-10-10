@@ -2,6 +2,8 @@
 
 use super::js_value::{compare, to_number};
 use super::{Evaluated, Evaluator, Missing, UnitSlot};
+use std::rc::Rc;
+
 use crate::ast::{NodeId, Tranche, TrancheMechanism, Value};
 use crate::error::{Error, Result};
 use crate::units::{Unit, UnitOperator, convert_unit, infer_unit, parse_unit};
@@ -61,7 +63,8 @@ impl Evaluator<'_> {
                     [plafond.unit.get(), multiplicateur.unit.get()],
                 );
                 if let Some(value) = plafond_value
-                    && let Ok(converted) = convert_unit(from.as_ref(), assiette.unit.get(), value)
+                    && let Ok(converted) =
+                        convert_unit(from.as_deref(), assiette.unit.unit(), value)
                 {
                     plafond_value = Some(converted);
                 }
@@ -190,7 +193,7 @@ impl Evaluator<'_> {
                     } else {
                         let rate = match &taux.value {
                             Value::Number(n) => {
-                                convert_unit(taux.unit.get(), Some(&parse_unit("")?), *n)?
+                                convert_unit(taux.unit.unit(), Some(&parse_unit("")?), *n)?
                             }
                             other => to_number(other),
                         };
@@ -281,7 +284,7 @@ impl Evaluator<'_> {
             Error::evaluation("Une tranche de taux progressif doit avoir un taux")
         })?;
         let taux = self.evaluate(taux)?;
-        self.convert_node(Some(&percent()), &taux)
+        self.convert_node(Some(&Rc::new(percent())), &taux)
     }
 
     fn taux_progressif(
@@ -291,7 +294,7 @@ impl Evaluator<'_> {
         multiplicateur: Evaluated,
     ) -> Result<Evaluated> {
         let bounded = self.bound_tranches(tranches, &assiette, &multiplicateur)?;
-        let unit = UnitSlot::present(Some(percent()));
+        let unit = UnitSlot::present(Some(Rc::new(percent())));
         let result = |value, missing| Evaluated {
             value,
             unit: unit.clone(),

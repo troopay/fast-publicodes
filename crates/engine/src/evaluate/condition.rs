@@ -1,7 +1,7 @@
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
 use crate::error::{Error, Result};
-use crate::units::Unit;
+use crate::units::UnitRef;
 
 /// A branch of a condition: a node, or `est non applicable` of a node.
 #[derive(Debug, Clone, Copy)]
@@ -19,7 +19,7 @@ impl Evaluator<'_> {
     }
 
     /// The unit a branch carries before evaluation.
-    fn static_unit(&self, branch: Branch) -> Option<Unit> {
+    fn static_unit(&self, branch: Branch) -> Option<UnitRef> {
         match branch {
             Branch::Node(id) => self.program.node(id).static_unit().cloned(),
             Branch::NotApplicable(_) => None,

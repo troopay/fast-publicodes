@@ -1,11 +1,17 @@
 //! Units: parsing, serialization, inference and conversion.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::LazyLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::error::{Error, ErrorKind, Result};
 use crate::js::round_to_16_decimals;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+pub type UnitRef = Rc<Unit>;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Unit {
     pub numerators: Vec<String>,
     pub denominators: Vec<String>,
@@ -108,35 +114,89 @@ pub enum UnitOperator {
     Minus,
 }
 
-pub fn infer_unit(operator: UnitOperator, units: [Option<&Unit>; 2]) -> Option<Unit> {
+/// `inferUnit`; returns an operand's unit itself when the result equals it.
+pub fn infer_unit(operator: UnitOperator, units: [Option<&UnitRef>; 2]) -> Option<UnitRef> {
     if operator == UnitOperator::Divide {
-        let no_unit = Unit::default();
-        let left = units[0].unwrap_or(&no_unit);
-        let right = units[1].unwrap_or(&no_unit);
-        let inverted = Unit {
-            numerators: right.denominators.clone(),
-            denominators: right.numerators.clone(),
+        return match units {
+            [Some(left), None] if is_simplified(left) => Some(left.clone()),
+            _ => {
+                let no_unit = Unit::default();
+                let left = units[0].map_or(&no_unit, |u| u);
+                let right = units[1].map_or(&no_unit, |u| u);
+                let product = Unit {
+                    numerators: left
+                        .numerators
+                        .iter()
+                        .chain(&right.denominators)
+                        .cloned()
+                        .collect(),
+                    denominators: left
+                        .denominators
+                        .iter()
+                        .chain(&right.numerators)
+                        .cloned()
+                        .collect(),
+                };
+                Some(Rc::new(simplify(&product, |a, b| a == b)))
+            }
         };
-        return infer_unit(UnitOperator::Times, [Some(left), Some(&inverted)]);
     }
-    let defined: Vec<&Unit> = units.into_iter().flatten().collect();
-    if defined.len() <= 1 {
-        return defined.first().map(|unit| (*unit).clone());
-    }
-    match operator {
-        UnitOperator::Times => Some(simplify(
-            &Unit {
-                numerators: defined.iter().flat_map(|u| u.numerators.clone()).collect(),
-                denominators: defined
+    match (units, operator) {
+        ([None, None], _) => None,
+        ([Some(unit), None] | [None, Some(unit)], _) => Some(unit.clone()),
+        ([Some(left), Some(right)], UnitOperator::Times) => {
+            let product = Unit {
+                numerators: left
+                    .numerators
                     .iter()
-                    .flat_map(|u| u.denominators.clone())
+                    .chain(&right.numerators)
+                    .cloned()
                     .collect(),
-            },
-            |a, b| a == b,
-        )),
-        UnitOperator::Plus | UnitOperator::Minus => Some(defined[0].clone()),
-        UnitOperator::Divide | UnitOperator::IntegerDivide => None,
+                denominators: left
+                    .denominators
+                    .iter()
+                    .chain(&right.denominators)
+                    .cloned()
+                    .collect(),
+            };
+            Some(Rc::new(simplify(&product, |a, b| a == b)))
+        }
+        ([Some(left), Some(_)], UnitOperator::Plus | UnitOperator::Minus) => Some(left.clone()),
+        ([Some(_), Some(_)], _) => None,
     }
+}
+
+/// Whether no unit appears both as a numerator and a denominator.
+fn is_simplified(unit: &Unit) -> bool {
+    !unit
+        .numerators
+        .iter()
+        .any(|n| unit.denominators.contains(n))
+}
+
+/// Whether `serialize_unit(unit)` is `%`.
+pub fn is_percent(unit: Option<&Unit>) -> bool {
+    let Some(unit) = unit else {
+        return false;
+    };
+    let count = |list: &[String], name: &str| list.iter().filter(|u| *u == name).count();
+    let remaining = |list: &[String], other: &[String], name: &str| {
+        count(list, name).saturating_sub(count(other, name))
+    };
+    unit.numerators
+        .iter()
+        .chain(&unit.denominators)
+        .all(|name| match name.as_str() {
+            "%" => {
+                remaining(&unit.numerators, &unit.denominators, "%") == 1
+                    && remaining(&unit.denominators, &unit.numerators, "%") == 0
+            }
+            other => {
+                remaining(&unit.numerators, &unit.denominators, other) == 0
+                    && remaining(&unit.denominators, &unit.numerators, other) == 0
+            }
+        })
+        && unit.numerators.iter().any(|n| n == "%")
 }
 
 fn remove_once(list: &mut Vec<String>, element: &str, eq: impl Fn(&str, &str) -> bool) {
@@ -309,8 +369,7 @@ fn are_unit_convertible(a: Option<&Unit>, b: Option<&Unit>) -> bool {
     })
 }
 
-/// Fails when `from` cannot be converted to `to`.
-pub fn check_convertible(from: Option<&Unit>, to: Option<&Unit>) -> Result<()> {
+fn check_convertible_uncached(from: Option<&Unit>, to: Option<&Unit>) -> Result<()> {
     let serialized_from = serialize_unit(from);
     let serialized_to = serialize_unit(to);
     if are_equivalent_serialized(serialized_from.as_deref(), serialized_to.as_deref())
@@ -328,15 +387,23 @@ pub fn check_convertible(from: Option<&Unit>, to: Option<&Unit>) -> Result<()> {
     ))
 }
 
-/// `convertUnit` for a number.
-pub fn convert_unit(from: Option<&Unit>, to: Option<&Unit>, value: f64) -> Result<f64> {
-    check_convertible(from, to)?;
-    let Some(from) = from else {
-        return Ok(value);
-    };
-    if value == 0. || value.is_nan() {
-        return Ok(value);
+/// How a value converts between two units.
+#[derive(Clone)]
+enum Conversion {
+    Impossible(Error),
+    /// The value has no unit and keeps its value.
+    Unchanged,
+    /// Multiplied by the first, then divided by the second, then multiplied by the others.
+    Factors([f64; 4]),
+}
+
+fn compute_conversion(from: Option<&Unit>, to: Option<&Unit>) -> Conversion {
+    if let Err(error) = check_convertible_uncached(from, to) {
+        return Conversion::Impossible(error);
     }
+    let Some(from) = from else {
+        return Conversion::Unchanged;
+    };
     let no_unit = Unit::default();
     let (from_simplified, factor_to) = simplify_unit_with_factor(from);
     let (to_simplified, factor_from) = simplify_unit_with_factor(to.unwrap_or(&no_unit));
@@ -344,9 +411,58 @@ pub fn convert_unit(from: Option<&Unit>, to: Option<&Unit>, value: f64) -> Resul
         units_conversion_factor(&from_simplified.numerators, &to_simplified.numerators);
     let denominators =
         units_conversion_factor(&to_simplified.denominators, &from_simplified.denominators);
-    Ok(round_to_16_decimals(
-        value * factor_to / factor_from * numerators * denominators,
-    ))
+    Conversion::Factors([factor_to, factor_from, numerators, denominators])
+}
+
+thread_local! {
+    /// An id for each unit met, to memoize conversions.
+    static UNIT_IDS: RefCell<FxHashMap<Unit, u32>> = RefCell::default();
+    static CONVERSIONS: RefCell<FxHashMap<(u32, u32), Conversion>> = RefCell::default();
+}
+
+fn unit_id(unit: Option<&Unit>) -> u32 {
+    let Some(unit) = unit else {
+        return 0;
+    };
+    UNIT_IDS.with(|ids| {
+        let mut ids = ids.borrow_mut();
+        if let Some(&id) = ids.get(unit) {
+            return id;
+        }
+        let id = ids.len() as u32 + 1;
+        ids.insert(unit.clone(), id);
+        id
+    })
+}
+
+fn conversion(from: Option<&Unit>, to: Option<&Unit>) -> Conversion {
+    let key = (unit_id(from), unit_id(to));
+    if let Some(conversion) = CONVERSIONS.with(|c| c.borrow().get(&key).cloned()) {
+        return conversion;
+    }
+    let conversion = compute_conversion(from, to);
+    CONVERSIONS.with(|c| c.borrow_mut().insert(key, conversion.clone()));
+    conversion
+}
+
+/// Fails when `from` cannot be converted to `to`.
+pub fn check_convertible(from: Option<&Unit>, to: Option<&Unit>) -> Result<()> {
+    match conversion(from, to) {
+        Conversion::Impossible(error) => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// `convertUnit` for a number.
+pub fn convert_unit(from: Option<&Unit>, to: Option<&Unit>, value: f64) -> Result<f64> {
+    match conversion(from, to) {
+        Conversion::Impossible(error) => Err(error),
+        Conversion::Unchanged => Ok(value),
+        _ if value == 0. || value.is_nan() => Ok(value),
+        Conversion::Factors([factor_to, factor_from, numerators, denominators]) => Ok(
+            round_to_16_decimals(value * factor_to / factor_from * numerators * denominators),
+        ),
+    }
 }
 
 #[cfg(test)]

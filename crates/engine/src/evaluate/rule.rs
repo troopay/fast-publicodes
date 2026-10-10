@@ -40,7 +40,7 @@ impl Evaluator<'_> {
         let mut valeur_missing = valeur.missing.clone();
         if rule.reports_missing && valeur.value == Value::Undefined && valeur_missing.is_empty() {
             valeur_missing = Missing::single(rule.name, 1.);
-            if let Some(cached) = self.state.cache[rule.valeur.0 as usize].as_mut() {
+            if let Some(cached) = self.state.cache.get_own_mut(rule.valeur) {
                 cached.missing = valeur_missing.clone();
             }
         }
@@ -49,7 +49,7 @@ impl Evaluator<'_> {
         Ok(Evaluated {
             value: valeur.value,
             unit: match possibilities_unit {
-                Some(unit) => UnitSlot::Set(unit.into()),
+                Some(unit) => UnitSlot::Set(unit),
                 None => valeur.unit,
             },
             missing: possibilities_missing
@@ -61,7 +61,7 @@ impl Evaluator<'_> {
     /// `evaluateDisablingParent`: whether a parent makes the rule not applicable.
     fn disabling_parent(&mut self, rule: &Rule) -> Result<(bool, Missing)> {
         let program = self.program;
-        if program.names.name(rule.name).ends_with("$SITUATION") {
+        if rule.is_situation {
             return Ok((false, Missing::default()));
         }
         let Some(parent) = rule.parents.iter().copied().find(|&parent| {
@@ -149,13 +149,9 @@ impl Evaluator<'_> {
     }
 
     fn situation_is_nullable(&self, rule: &Rule) -> bool {
-        let program = self.program;
-        let name = format!("{} . $SITUATION", program.names.name(rule.name));
-        program
-            .names
-            .get(&name)
-            .and_then(|id| self.rule_node(id))
-            .and_then(|node| program.ty(node))
+        rule.situation
+            .and_then(|name| self.rule_node(name))
+            .and_then(|node| self.program.ty(node))
             .is_some_and(|t| t.nullable == Some(true))
     }
 }

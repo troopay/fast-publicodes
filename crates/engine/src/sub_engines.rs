@@ -1,6 +1,6 @@
 //! The rules sub-engines evaluate with, created once the references they need are resolved.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::{Constant, InversionRules, NameId, Node, NodeId, Program, Rule, Type, Value};
 
@@ -44,7 +44,7 @@ pub fn prepare_sub_engines(
     roots: impl IntoIterator<Item = NodeId>,
 ) -> Vec<NodeId> {
     let mut created = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited = FxHashSet::default();
     let mut stack: Vec<NodeId> = roots.into_iter().collect();
     while let Some(id) = stack.pop() {
         if !visited.insert(id) {

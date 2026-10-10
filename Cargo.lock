@@ -49,6 +49,7 @@ name = "fast-publicodes-engine"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "rustc-hash",
  "ryu-js",
  "serde_json",
 ]

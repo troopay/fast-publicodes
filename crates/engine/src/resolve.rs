@@ -3,7 +3,7 @@
 //! Resolution copies every node except references and constants, so after it rules share only
 //! those nodes.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::ast::{NameId, Node, NodeId, Program, rule_parents};
 use crate::error::{Error, Result};
@@ -15,29 +15,33 @@ use crate::types::{infer_rule_types, infer_types};
 /// The rules references resolve against: the defined ones, shadowed by those being added.
 struct Scope<'a> {
     program: &'a Program,
-    batch: &'a HashMap<NameId, NodeId>,
+    batch: &'a FxHashMap<NameId, NodeId>,
 }
 
 impl Scope<'_> {
-    fn rule_private(&self, name: &str) -> Option<bool> {
-        let id = self.program.names.get(name)?;
+    fn rule_private(&self, name: NameId) -> Option<bool> {
         let node = self
             .batch
-            .get(&id)
+            .get(&name)
             .copied()
-            .or_else(|| self.program.rule_node(id))?;
+            .or_else(|| self.program.rule_node(name))?;
         match self.program.node(node) {
             Node::Rule(rule) => Some(rule.private),
             _ => None,
         }
     }
 
+    fn named_rule_private(&self, name: &str) -> Option<bool> {
+        self.rule_private(self.program.names.get(name)?)
+    }
+
     fn is_rule(&self, name: &str) -> bool {
-        self.rule_private(name).is_some()
+        self.named_rule_private(name).is_some()
     }
 
     fn is_accessible(&self, context: &str, name: &str) -> bool {
         let common = common_ancestor(context, name);
+        // `name`, its ancestors nearest first, then the root.
         let mut parents = vec![name];
         parents.extend(rule_parents(name));
         parents.push("");
@@ -47,10 +51,10 @@ impl Scope<'_> {
             .map_or(0, |index| index.saturating_sub(1));
         parents[..end]
             .iter()
-            .all(|p| self.rule_private(p) != Some(true))
+            .all(|p| self.named_rule_private(p) != Some(true))
     }
 
-    fn disambiguate(&self, from: &str, written: &str) -> Result<String> {
+    fn disambiguate(&self, from: &str, written: &str) -> Result<NameId> {
         let mut contexts: Vec<&str> = rule_parents(from);
         contexts.push(from);
         let mut partial = written;
@@ -65,24 +69,39 @@ impl Scope<'_> {
         let root = contexts.pop().unwrap_or("");
         contexts.insert(0, root);
         contexts.push("");
-        let candidate = |context: &str| {
-            if context.is_empty() {
-                partial.to_owned()
-            } else {
-                format!("{context} . {partial}")
-            }
-        };
+        let mut candidate = String::with_capacity(from.len() + partial.len() + 3);
         for context in &contexts {
-            let name = candidate(context);
-            if self.is_rule(&name) && name != from && self.is_accessible(from, &name) {
-                return Ok(name);
+            candidate.clear();
+            if !context.is_empty() {
+                candidate.push_str(context);
+                candidate.push_str(" . ");
+            }
+            candidate.push_str(partial);
+            if let Some(id) = self.program.names.get(&candidate)
+                && self.rule_private(id).is_some()
+                && candidate != from
+                && self.is_accessible(from, &candidate)
+            {
+                return Ok(id);
             }
         }
-        if from.ends_with(partial) {
-            return Ok(from.to_owned());
+        if from.ends_with(partial)
+            && let Some(id) = self.program.names.get(from)
+        {
+            return Ok(id);
         }
         let rule = from.strip_suffix(" . $SITUATION").unwrap_or(from);
-        match contexts.iter().map(|c| candidate(c)).find(|n| self.is_rule(n)) {
+        let existing = contexts
+            .iter()
+            .map(|c| {
+                if c.is_empty() {
+                    partial.to_owned()
+                } else {
+                    format!("{c} . {partial}")
+                }
+            })
+            .find(|n| self.is_rule(n));
+        match existing {
             None => Err(Error::syntax(format!(
                 "La référence \"{partial}\" est introuvable.\nVérifiez que l'orthographe et l'espace de nom sont corrects"
             ))
@@ -97,7 +116,7 @@ impl Scope<'_> {
 
 struct Resolver<'a> {
     program: &'a mut Program,
-    batch: HashMap<NameId, NodeId>,
+    batch: FxHashMap<NameId, NodeId>,
     /// `(rule, referenced rule)` for every reference resolved outside replacements.
     uses: Vec<(NameId, NameId)>,
 }
@@ -117,9 +136,9 @@ impl Resolver<'_> {
         if let Some(target) = reference.target {
             return Ok(Some(target));
         }
-        let from = self.program.names.name(reference.context).to_owned();
-        let target = self.scope().disambiguate(&from, &reference.name)?;
-        let target = self.program.names.intern(&target);
+        let scope = self.scope();
+        let target =
+            scope.disambiguate(scope.program.names.name(reference.context), &reference.name)?;
         if let Node::Reference(r) = self.program.node_mut(id) {
             r.target = Some(target);
         }
@@ -127,46 +146,59 @@ impl Resolver<'_> {
     }
 
     fn resolve(&mut self, id: NodeId) -> Result<NodeId> {
-        let node = self.program.node(id).clone();
-        match node {
+        match self.program.node(id) {
             Node::Reference(reference) => {
+                let context = reference.context;
                 if let Some(target) = self.resolve_reference(id)? {
-                    self.uses.push((reference.context, target));
+                    self.uses.push((context, target));
                 }
                 Ok(id)
             }
             Node::Constant(_) => Ok(id),
-            other => {
-                if let Node::Rule(rule) = &other {
-                    for reference in rule.replacements.iter().flat_map(|r| r.references()) {
+            node => {
+                if let Node::Rule(rule) = node {
+                    let references: Vec<NodeId> = rule
+                        .replacements
+                        .iter()
+                        .flat_map(|r| r.references())
+                        .collect();
+                    for reference in references {
                         self.resolve_reference(reference)?;
                     }
                 }
-                let copy = other.map_children(|child| self.resolve(child))?;
+                let children = self.program.node(id).children();
+                let resolved = children
+                    .into_iter()
+                    .map(|child| self.resolve(child))
+                    .collect::<Result<Vec<_>>>()?;
+                let copy = self.program.node(id).with_children(resolved);
                 Ok(self.program.push(copy))
             }
         }
     }
 }
 
-fn common_ancestor(a: &str, b: &str) -> String {
-    let a_parts: Vec<&str> = a.split(" . ").collect();
-    let b_parts: Vec<&str> = b.split(" . ").collect();
-    match a_parts
-        .iter()
-        .enumerate()
-        .position(|(i, part)| b_parts.get(i) != Some(part))
-    {
-        None => a.to_owned(),
-        Some(index) => a_parts[..index].join(" . "),
+/// The segments `a` starts with that `b` also starts with.
+fn common_ancestor<'a>(a: &'a str, b: &str) -> &'a str {
+    let mut b_parts = b.split(" . ");
+    let mut end = None;
+    let mut offset = 0;
+    for part in a.split(" . ") {
+        if b_parts.next() != Some(part) {
+            return &a[..end.unwrap_or(0)];
+        }
+        offset += part.len();
+        end = Some(offset);
+        offset += 3;
     }
+    a
 }
 
 /// The rule a reference written `written` in rule `from` points to.
-pub fn disambiguate(program: &Program, from: &str, written: &str) -> Result<String> {
+pub fn disambiguate(program: &Program, from: &str, written: &str) -> Result<NameId> {
     Scope {
         program,
-        batch: &HashMap::new(),
+        batch: &FxHashMap::default(),
     }
     .disambiguate(from, written)
 }

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use super::js_value::power;
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
@@ -25,6 +27,11 @@ impl Evaluator<'_> {
             None => Ok(node),
             Some(unit) => {
                 let simplified = simplify_unit(unit);
+                let simplified = if simplified == **unit {
+                    unit.clone()
+                } else {
+                    Rc::new(simplified)
+                };
                 self.convert_node(Some(&simplified), &node)
             }
         }
@@ -38,11 +45,11 @@ impl Evaluator<'_> {
         } else {
             let arrondi = self.evaluate(arrondi)?;
             if let Value::Number(_) = arrondi.value
-                && !serialize_unit(arrondi.unit.get()).is_some_and(|u| u.contains("décimale"))
+                && !serialize_unit(arrondi.unit.unit()).is_some_and(|u| u.contains("décimale"))
             {
                 return Err(Error::evaluation(format!(
                     "L'unité {} de l'arrondi est inconnu. Vous devez utiliser l'unité “décimales”",
-                    serialize_unit(arrondi.unit.get()).unwrap_or_default()
+                    serialize_unit(arrondi.unit.unit()).unwrap_or_default()
                 )));
             }
             Some(arrondi)

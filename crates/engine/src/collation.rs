@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Class {
+pub enum Class {
     Space,
     Punctuation,
     Symbol,
@@ -61,9 +61,10 @@ fn class(c: char) -> Class {
     }
 }
 
-type Weights = (Vec<(Class, char)>, Vec<u8>, Vec<bool>);
+/// Comparing weights compares the texts as `localeCompare` does.
+pub type Weights = (Vec<(Class, char)>, Vec<u8>, Vec<bool>);
 
-fn weights(text: &str) -> Weights {
+pub fn weights(text: &str) -> Weights {
     let (mut primary, mut secondary, mut tertiary) = (Vec::new(), Vec::new(), Vec::new());
     for c in text.chars() {
         let (base, accent, upper) = decompose(c);
@@ -84,10 +85,7 @@ fn weights(text: &str) -> Weights {
 }
 
 pub fn locale_compare(a: &str, b: &str) -> Ordering {
-    let (a, b) = (weights(a), weights(b));
-    a.0.cmp(&b.0)
-        .then_with(|| a.1.cmp(&b.1))
-        .then_with(|| a.2.cmp(&b.2))
+    weights(a).cmp(&weights(b))
 }
 
 #[cfg(test)]

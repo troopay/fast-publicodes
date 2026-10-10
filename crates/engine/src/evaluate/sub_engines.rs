@@ -1,7 +1,7 @@
 //! `contexte`, `inversion numérique` and `résoudre la référence circulaire`, which evaluate in
 //! sub-engines with a modified situation.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use super::js_value::{compare, to_number};
 use super::{EvalState, Evaluated, Evaluator, Missing, UnitSlot};
@@ -170,7 +170,7 @@ impl Evaluator<'_> {
                 undefined_origins.push(name);
             }
             if origin.value != replacement.value
-                || serialize_unit(origin.unit.get()) != serialize_unit(replacement.unit.get())
+                || serialize_unit(origin.unit.unit()) != serialize_unit(replacement.unit.unit())
             {
                 amended.push((name, pair));
             }
@@ -209,7 +209,7 @@ impl Evaluator<'_> {
         if amended.is_empty() {
             return Ok(sub);
         }
-        let mut layer = HashMap::new();
+        let mut layer = FxHashMap::default();
         for (name, pair) in amended {
             let situation = situation_name(program, *name).ok_or_else(unresolved)?;
             layer.insert(situation, pair.situation.ok_or_else(unresolved)?.0);
@@ -224,7 +224,7 @@ impl Evaluator<'_> {
                 continue;
             };
             let value = Evaluator::new(program, &mut sub).evaluate(checked)?;
-            sub.cache[pair.replacement.0 as usize] = Some(value.clone());
+            sub.cache.insert(pair.replacement, value.clone());
             let reference = matches!(
                 program.node(possibilities),
                 Node::UnePossibilite {
@@ -236,16 +236,42 @@ impl Evaluator<'_> {
                 Evaluator::new(program, &mut sub).evaluate(possibilities)?;
             }
         }
-        sub.cache.resize(program.nodes.len(), None);
         for (_, pair) in amended {
             let Some((rule, _)) = pair.situation else {
                 continue;
             };
-            if let Node::Rule(rule) = program.node(rule) {
-                sub.cache[rule.valeur.0 as usize] = self.cached(pair.replacement).cloned();
+            if let (Node::Rule(rule), Some(evaluated)) =
+                (program.node(rule), self.cached(pair.replacement))
+            {
+                sub.cache.insert(rule.valeur, evaluated.clone());
             }
         }
         Ok(sub)
+    }
+
+    /// The first candidate known as a number in the situation, with its evaluation.
+    fn inversion_goal(
+        &self,
+        state: &mut EvalState,
+        candidates: &[NodeId],
+    ) -> Result<Option<(usize, NodeId, NameId, Evaluated)>> {
+        let program = self.program;
+        for (index, &candidate) in candidates.iter().enumerate() {
+            let name = target(program, candidate)?;
+            if self.state.rule_stack.contains(&name) {
+                continue;
+            }
+            let mut evaluator = Evaluator::new(program, state);
+            let situation = situation_name(program, name)
+                .and_then(|situation| evaluator.rule_node(situation))
+                .ok_or_else(unresolved)?;
+            let evaluation = evaluator.evaluate(situation)?;
+            if matches!(evaluation.value, Value::Number(_)) && !evaluation.missing.contains(name) {
+                let evaluated_goal = evaluator.evaluate(candidate)?;
+                return Ok(Some((index, candidate, name, evaluated_goal)));
+            }
+        }
+        Ok(None)
     }
 
     pub(super) fn inversion(
@@ -259,36 +285,25 @@ impl Evaluator<'_> {
         if self.rule_on_stack_below_top(rule) {
             return Ok(Evaluated::new(Value::Undefined, Missing::default()));
         }
-        let mut state = self.fork(true, true);
-        let mut goal = None;
-        for (index, &candidate) in candidates.iter().enumerate() {
-            let name = target(program, candidate)?;
-            if self.state.rule_stack.contains(&name) {
-                continue;
-            }
-            let situation = situation_name(program, name)
-                .and_then(|situation| Evaluator::new(program, &mut state).rule_node(situation))
-                .ok_or_else(unresolved)?;
-            let evaluation = Evaluator::new(program, &mut state).evaluate(situation)?;
-            if matches!(evaluation.value, Value::Number(_)) && !evaluation.missing.contains(name) {
-                goal = Some((index, candidate, name));
-                break;
-            }
-        }
-        let Some((index, goal, goal_name)) = goal else {
+        // Like a copy of this cache, but cheaper: this engine waits while the goal is sought.
+        let mut state = self.fork(false, true);
+        state.cache = self.state.cache.lend();
+        let goal = self.inversion_goal(&mut state, candidates);
+        let mut lent = std::mem::take(&mut state.cache);
+        self.state.cache.restore(&mut lent);
+        let Some((index, goal, goal_name, evaluated_goal)) = goal? else {
             let mut missing = Missing::default();
             for &candidate in candidates {
                 missing = missing.with(target(program, candidate)?, 1.);
             }
             return Ok(Evaluated::new(Value::Undefined, missing.with(rule, 1.)));
         };
-        let evaluated_goal = Evaluator::new(program, &mut state).evaluate(goal)?;
         state.clear();
         let goal_situation = situation_name(program, goal_name).ok_or_else(unresolved)?;
         let goal_rule = rules.goal_rules[index].ok_or_else(unresolved)?;
         state
             .layers
-            .push(HashMap::from([(goal_situation, goal_rule)]));
+            .push(FxHashMap::from_iter([(goal_situation, goal_rule)]));
         let mut iteration = Iteration {
             program,
             state,
@@ -378,7 +393,7 @@ impl Evaluator<'_> {
             return Ok(Evaluated::new(Value::Undefined, Missing::default()));
         }
         let mut state = self.fork(false, true);
-        state.layers.push(HashMap::new());
+        state.layers.push(FxHashMap::default());
         let mut iteration = Iteration {
             program,
             state,

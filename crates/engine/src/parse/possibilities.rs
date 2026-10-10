@@ -3,13 +3,15 @@
 use super::Parser;
 use crate::ast::{Node, NodeId, PossibilityKind, Type, Value};
 use crate::error::Result;
-use crate::raw::Raw;
-use crate::units::{Unit, convert_unit, serialize_unit};
+use std::rc::Rc;
+
+use crate::raw::{Entries, Raw};
+use crate::units::{UnitRef, convert_unit, serialize_unit};
 
 struct Possibility {
     node: NodeId,
     kind: PossibilityKind,
-    unit: Option<Unit>,
+    unit: Option<UnitRef>,
     value: Value,
     publicodes_value: String,
 }
@@ -19,16 +21,16 @@ impl Parser<'_> {
     pub(super) fn parse_une_possibilite(
         &mut self,
         raw: &mut Raw,
-        avec: &mut Vec<(String, Raw)>,
+        avec: &mut Entries,
     ) -> Result<Option<NodeId>> {
         let mut possibilities = None;
         for key in ["valeur", "formule"] {
             if let Some(Raw::Map(entries)) = raw.get_mut(key)
                 && let Some(index) = entries
                     .iter()
-                    .position(|(k, v)| k == "une possibilité" && v.is_truthy())
+                    .position(|(k, v)| &**k == "une possibilité" && v.is_truthy())
             {
-                possibilities = Some(entries.remove(index).1);
+                possibilities = Some(Rc::make_mut(entries).remove(index).1);
             }
         }
         if let Some(value) = raw.get("une possibilité") {
@@ -58,7 +60,7 @@ impl Parser<'_> {
         let mut options: Vec<Possibility> = Vec::with_capacity(items.len());
         // The option others are checked against: the first, then the latest number with a unit.
         let mut reference = 0;
-        for item in &items {
+        for item in items.iter() {
             let option = self.parse_option(item, avec)?;
             if let Some(reference_option) = options.get(reference) {
                 if option.kind != reference_option.kind {
@@ -68,13 +70,13 @@ impl Parser<'_> {
                     )));
                 }
                 if option.kind == PossibilityKind::Number && reference_option.unit.is_some() {
-                    if convert_unit(option.unit.as_ref(), reference_option.unit.as_ref(), 0.)
+                    if convert_unit(option.unit.as_deref(), reference_option.unit.as_deref(), 0.)
                         .is_err()
                     {
                         return Err(self.syntax(format!(
                             "Les possibilités doivent être toutes dans la même classe d'unité.\n{} n'est pas convertible en {}.",
-                            serialize_unit(option.unit.as_ref()).unwrap_or_default(),
-                            serialize_unit(reference_option.unit.as_ref()).unwrap_or_default()
+                            serialize_unit(option.unit.as_deref()).unwrap_or_default(),
+                            serialize_unit(reference_option.unit.as_deref()).unwrap_or_default()
                         )));
                     }
                     reference = options.len();
@@ -89,7 +91,7 @@ impl Parser<'_> {
         for option in &options {
             let value = match (kind, &option.value) {
                 (PossibilityKind::Number, Value::Number(n)) => {
-                    Value::Number(convert_unit(option.unit.as_ref(), unit.as_ref(), *n)?)
+                    Value::Number(convert_unit(option.unit.as_deref(), unit.as_deref(), *n)?)
                 }
                 _ => Value::String(option.publicodes_value.as_str().into()),
             };
@@ -115,7 +117,7 @@ impl Parser<'_> {
         })))
     }
 
-    fn parse_option(&mut self, item: &Raw, avec: &mut Vec<(String, Raw)>) -> Result<Possibility> {
+    fn parse_option(&mut self, item: &Raw, avec: &mut Entries) -> Result<Possibility> {
         let possibility = match item {
             Raw::Map(entries) => {
                 let [(key, value)] = entries.as_slice() else {
@@ -156,7 +158,7 @@ impl Parser<'_> {
                 };
                 let publicodes_value = match (&constant.value, &possibility) {
                     (Value::String(s), _) => format!("'{s}'"),
-                    (_, Raw::String(text)) => text.clone(),
+                    (_, Raw::String(text)) => text.to_string(),
                     (_, Raw::Number(n)) => crate::js::number_to_string(*n),
                     _ => String::new(),
                 };

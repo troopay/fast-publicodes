@@ -5,7 +5,8 @@ mod possibilities;
 mod replacements;
 mod sub_engines;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
+use std::rc::Rc;
 
 pub use inline::Templates;
 
@@ -16,7 +17,7 @@ use crate::ast::{
 use crate::error::{Error, ErrorKind, Result};
 use crate::expression::{number, parse_expression};
 use crate::js::number_to_string;
-use crate::raw::Raw;
+use crate::raw::{Entries, Raw};
 use crate::units::parse_unit;
 
 /// Mechanisms written alongside a value, in the order they wrap it.
@@ -72,7 +73,7 @@ fn is_mechanism_key(key: &str) -> bool {
 #[derive(Debug, Default)]
 pub struct Batch {
     pub rules: Vec<(crate::ast::NameId, Option<NodeId>)>,
-    positions: HashMap<crate::ast::NameId, usize>,
+    positions: FxHashMap<crate::ast::NameId, usize>,
 }
 
 impl Batch {
@@ -141,8 +142,12 @@ impl<'a> Parser<'a> {
             && let Some(name) = CHAINABLE.iter().find(|name| raw.get(name).is_some())
         {
             let param = raw.get(name).cloned().unwrap_or(Raw::Null);
-            let rest = entries.iter().filter(|(k, _)| k != name).cloned().collect();
-            let values = Raw::map([("valeur", Raw::Map(rest)), (*name, param)]);
+            let rest: Entries = entries
+                .iter()
+                .filter(|(k, _)| &**k != *name)
+                .cloned()
+                .collect();
+            let values = Raw::map([("valeur", Raw::Map(Rc::new(rest))), (*name, param)]);
             return self.parse_mechanism(name, &values);
         }
         match raw {
@@ -194,7 +199,10 @@ impl<'a> Parser<'a> {
                     )
                 })?;
                 let unit = parse_unit(text).map_err(|e| e.in_rule(&self.context))?;
-                Ok(self.push(Node::Unite { unit, valeur }))
+                Ok(self.push(Node::Unite {
+                    unit: Rc::new(unit),
+                    valeur,
+                }))
             }
             "simplifier l'unité" => {
                 let valeur = self.parse_field(value, "valeur")?;
@@ -255,8 +263,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_field(&mut self, value: &Raw, key: &str) -> Result<NodeId> {
-        let field = value.get(key).cloned().unwrap_or(Raw::Null);
-        self.parse(&field)
+        match value.get(key) {
+            Some(field) => self.parse(field),
+            None => self.parse(&Raw::Null),
+        }
     }
 
     fn parse_operation(&mut self, operator: Operator, value: &Raw) -> Result<NodeId> {
@@ -312,7 +322,7 @@ impl<'a> Parser<'a> {
         Ok(self.push(Node::Duree {
             depuis,
             jusqua,
-            unit,
+            unit: Rc::new(unit),
         }))
     }
 
@@ -344,7 +354,7 @@ impl<'a> Parser<'a> {
             return Err(self.syntax("Les tranches doivent être une liste"));
         };
         let mut tranches = Vec::with_capacity(items.len());
-        for item in items {
+        for item in items.iter() {
             let taux = item.get("taux").map(|raw| self.parse(raw)).transpose()?;
             let montant = item.get("montant").map(|raw| self.parse(raw)).transpose()?;
             let plafond = match item.get("plafond") {
@@ -375,7 +385,7 @@ impl<'a> Parser<'a> {
             return Err(self.syntax("Le mécanisme variations attend une liste"));
         };
         let mut branches = Vec::with_capacity(items.len());
-        for item in items {
+        for item in items.iter() {
             branches.push(match item.get("sinon") {
                 Some(sinon) => Branch {
                     consequence: self.parse(sinon)?,
@@ -421,14 +431,14 @@ impl<'a> Parser<'a> {
         let node_value = match value.get("nodeValue") {
             Some(Raw::Number(n)) => Value::Number(*n),
             Some(Raw::Bool(b)) => Value::Bool(*b),
-            Some(Raw::String(s)) => Value::String(s.as_str().into()),
+            Some(Raw::String(s)) => Value::String(s.clone()),
             Some(Raw::Null) => Value::Null,
             _ => Value::Undefined,
         };
         let unit = match (ty, value.get("rawUnit").and_then(Raw::as_str)) {
-            (Some(Type::Number), Some(raw_unit)) => {
-                Some(parse_unit(raw_unit).map_err(|e| e.in_rule(&self.context))?)
-            }
+            (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(
+                parse_unit(raw_unit).map_err(|e| e.in_rule(&self.context))?,
+            )),
             _ => None,
         };
         let nullable = Some(matches!(node_value, Value::Null | Value::Undefined));
@@ -445,17 +455,17 @@ impl<'a> Parser<'a> {
         let Raw::Map(entries) = rules else {
             return Ok(());
         };
-        for (name, value) in entries {
+        for (name, value) in entries.iter() {
             let rule = match value {
                 Raw::String(text) => Raw::map([("valeur", Raw::String(text.clone()))]),
-                Raw::Number(n) => Raw::map([("valeur", Raw::String(number_to_string(*n)))]),
+                Raw::Number(n) => Raw::map([("valeur", Raw::str(&number_to_string(*n)))]),
                 Raw::Map(_) => value.clone(),
-                Raw::Null | Raw::List(_) => Raw::Map(Vec::new()),
+                Raw::Null | Raw::List(_) => Raw::Map(Rc::default()),
                 Raw::Bool(_) | Raw::Node(_) => {
                     return Err(Error::syntax(format!(
                         "Rule {name} is incorrectly written. Please give it a proper value."
                     ))
-                    .in_rule(name));
+                    .in_rule(&**name));
                 }
             };
             self.parse_rule(name, &rule)?;
@@ -497,17 +507,18 @@ impl<'a> Parser<'a> {
         private: bool,
         raw: &Raw,
     ) -> Result<NodeId> {
-        let mut avec = match raw.get("avec") {
-            Some(Raw::Map(entries)) => entries.clone(),
+        let mut avec: Entries = match raw.get("avec") {
+            Some(Raw::Map(entries)) => entries.as_ref().clone(),
             _ => Vec::new(),
         };
         let mut raw = raw.clone();
         let possibilities = self.parse_une_possibilite(&mut raw, &mut avec)?;
         let raw = &raw;
-        let mut value: Vec<(String, Raw)> = Vec::new();
+        let mut value: Entries = Vec::new();
         if let Raw::Map(entries) = raw {
-            for (key, field) in entries {
-                if key != "avec" && is_mechanism_key(key) && !value.iter().any(|(k, _)| k == key) {
+            for (key, field) in entries.iter() {
+                if &**key != "avec" && is_mechanism_key(key) && !value.iter().any(|(k, _)| k == key)
+                {
                     value.push((key.clone(), field.clone()));
                 }
             }
@@ -519,7 +530,7 @@ impl<'a> Parser<'a> {
             set_entry(
                 &mut value,
                 "dans la situation",
-                Raw::String(format!("{dotted_name} . $SITUATION")),
+                Raw::str(&format!("{dotted_name} . $SITUATION")),
             );
             let situation = self.push(Node::Constant(Constant {
                 value: Value::Undefined,
@@ -535,7 +546,7 @@ impl<'a> Parser<'a> {
                 "[privé] $SITUATION",
                 Raw::map([("valeur", Raw::Node(situation))]),
             );
-            if let Some((_, default)) = value.iter_mut().find(|(k, _)| k == "par défaut")
+            if let Some((_, default)) = value.iter_mut().find(|(k, _)| &**k == "par défaut")
                 && !matches!(default, Raw::Null)
             {
                 *default = Raw::map([
@@ -544,8 +555,8 @@ impl<'a> Parser<'a> {
                 ]);
             }
         }
-        value.insert(0, ("avec".to_owned(), Raw::Map(avec)));
-        let valeur = self.parse(&Raw::Map(value))?;
+        value.insert(0, ("avec".into(), Raw::Map(Rc::new(avec))));
+        let valeur = self.parse(&Raw::Map(Rc::new(value)))?;
 
         let parents = rule_parents(dotted_name)
             .into_iter()
@@ -563,7 +574,7 @@ impl<'a> Parser<'a> {
             .collect();
         let mut suggestions = Vec::new();
         if let Some(Raw::Map(entries)) = raw.get("suggestions") {
-            for (_, suggestion) in entries {
+            for (_, suggestion) in entries.iter() {
                 suggestions.push(self.parse(suggestion)?);
             }
         }
@@ -577,6 +588,12 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         let question = raw.get("question").is_some_and(Raw::is_truthy);
+        let is_situation = dotted_name.ends_with("$SITUATION");
+        let situation = (!private && !is_situation).then(|| {
+            self.program
+                .names
+                .intern(&format!("{dotted_name} . $SITUATION"))
+        });
         Ok(self.push(Node::Rule(Box::new(Rule {
             name,
             private,
@@ -588,14 +605,16 @@ impl<'a> Parser<'a> {
             question,
             declared_type,
             reports_missing: false,
+            is_situation,
+            situation,
         }))))
     }
 }
 
-fn set_entry(entries: &mut Vec<(String, Raw)>, key: &str, value: Raw) {
-    match entries.iter_mut().find(|(k, _)| k == key) {
+fn set_entry(entries: &mut Entries, key: &str, value: Raw) {
+    match entries.iter_mut().find(|(k, _)| &**k == key) {
         Some((_, existing)) => *existing = value,
-        None => entries.push((key.to_owned(), value)),
+        None => entries.push((key.into(), value)),
     }
 }
 

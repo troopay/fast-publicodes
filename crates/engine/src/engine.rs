@@ -1,16 +1,17 @@
 //! The public engine: rules, situation and evaluation.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use serde_json::Value as Json;
 
-use crate::ast::{Node, NodeId, PossibilityKind, Program, Value};
+use crate::ast::{NameId, Node, NodeId, PossibilityKind, Program, Value};
 use crate::error::{Error, ErrorKind, Result};
 use crate::evaluate::{EvalState, Evaluated, Evaluator, Missing};
 use crate::expression::is_reference;
 use crate::js::number_to_string;
 use crate::parse::{Parser, Templates};
 use crate::raw::Raw;
+use crate::replace::applicable_replacements;
 use crate::resolve::{disambiguate, finalize};
 use crate::units::Unit;
 
@@ -22,6 +23,14 @@ pub struct Evaluation {
     pub missing: Missing,
 }
 
+/// What an expression made of a single reference evaluates.
+#[derive(Debug, Clone, Copy)]
+enum Reference {
+    Rule(NameId),
+    /// The node replacements turn the reference into, shared with the base rules.
+    Replaced(NodeId),
+}
+
 pub struct Engine {
     program: Program,
     templates: Templates,
@@ -29,7 +38,9 @@ pub struct Engine {
     base_len: usize,
     situation: Vec<(String, Raw)>,
     state: EvalState,
-    expressions: HashMap<String, Evaluated>,
+    expressions: FxHashMap<String, Evaluated>,
+    /// What each expression evaluated so far references directly, if anything.
+    referenced_rules: FxHashMap<Box<str>, Option<Reference>>,
 }
 
 impl Engine {
@@ -54,7 +65,8 @@ impl Engine {
             templates,
             situation: Vec::new(),
             state: EvalState::default(),
-            expressions: HashMap::new(),
+            expressions: FxHashMap::default(),
+            referenced_rules: FxHashMap::default(),
         })
     }
 
@@ -101,7 +113,7 @@ impl Engine {
                 continue;
             };
             let expression = match value {
-                Raw::String(text) => text.clone(),
+                Raw::String(text) => text.to_string(),
                 Raw::Number(n) => number_to_string(*n),
                 _ => continue,
             };
@@ -141,11 +153,10 @@ impl Engine {
 
     fn load_situation(&mut self, entries: &[(String, Raw)]) -> Result<()> {
         self.program.reset_overlay(self.base_len);
-        let rules = Raw::Map(
+        let rules = Raw::map(
             entries
                 .iter()
-                .map(|(name, value)| (format!("[privé] {name} . $SITUATION"), value.clone()))
-                .collect(),
+                .map(|(name, value)| (format!("[privé] {name} . $SITUATION"), value.clone())),
         );
         self.load_overlay(&rules)
     }
@@ -174,7 +185,7 @@ impl Engine {
         };
         Ok(Evaluation {
             value: evaluated.value,
-            unit: evaluated.unit.get().cloned(),
+            unit: evaluated.unit.unit().cloned(),
             missing: evaluated.missing,
         })
     }
@@ -215,20 +226,43 @@ impl Engine {
         Evaluator::new(&self.program, &mut self.state).evaluate(valeur)
     }
 
-    /// The rule node `expression` evaluates to when it only references a rule that no
-    /// replacement applies to; evaluating it directly skips parsing the expression.
-    fn referenced_rule(&self, expression: &str) -> Option<NodeId> {
+    /// The node `expression` evaluates to when it only references a rule; evaluating it
+    /// directly skips parsing the expression.
+    fn referenced_rule(&mut self, expression: &str) -> Option<NodeId> {
+        let target = match self.referenced_rules.get(expression) {
+            Some(target) => *target,
+            None => {
+                let target = self.resolve_reference(expression);
+                self.referenced_rules.insert(expression.into(), target);
+                target
+            }
+        };
+        match target? {
+            Reference::Rule(name) => self.program.rule_node(name),
+            Reference::Replaced(node) => Some(node),
+        }
+    }
+
+    /// Only the base rules decide what an expression references, so the result never changes.
+    fn resolve_reference(&mut self, expression: &str) -> Option<Reference> {
         if !is_reference(expression) {
             return None;
         }
-        let name = disambiguate(&self.program, "$EVALUATION", expression).ok()?;
-        if name == "$EVALUATION" {
+        let id = disambiguate(&self.program, "$EVALUATION", expression).ok()?;
+        if self.program.names.name(id) == "$EVALUATION" {
             return None;
         }
-        let id = self.program.names.get(&name)?;
-        if self.program.replacements.contains_key(&id) {
-            return None;
+        if !self.program.replacements.contains_key(&id) {
+            return Some(Reference::Rule(id));
         }
-        self.program.rule_node(id)
+        let context = self.program.names.intern("$EVALUATION");
+        let applicable =
+            applicable_replacements(&self.program, &self.program.replacements, id, context);
+        if applicable.is_empty() {
+            return Some(Reference::Rule(id));
+        }
+        let key: Vec<u32> = applicable.iter().map(|r| r.id).collect();
+        let node = *self.program.replacement_nodes.get(&key)?;
+        ((node.0 as usize) < self.base_len).then_some(Reference::Replaced(node))
     }
 }
