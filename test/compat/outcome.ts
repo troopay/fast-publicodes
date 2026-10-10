@@ -95,7 +95,26 @@ export function report(mismatches: Mismatch[], total: number, shown = 10) {
     );
   const more =
     mismatches.length > shown ? [`  … ${mismatches.length - shown} more`] : [];
-  return [`${mismatches.length}/${total} rules differ`, ...lines, ...more].join(
-    "\n",
-  );
+  return [
+    `${mismatches.length}/${total} rules differ`,
+    ...errorSummary(mismatches),
+    ...lines,
+    ...more,
+  ].join("\n");
+}
+
+/** The errors fast-publicodes raised where publicodes did not, most frequent first. */
+function errorSummary(mismatches: Mismatch[], shown = 5): string[] {
+  const counts = new Map<string, number>();
+  for (const { expected, received } of mismatches) {
+    if (!("error" in received) || "error" in expected) continue;
+    const message = received.error.trim().split("\n").at(-1) ?? "";
+    counts.set(message, (counts.get(message) ?? 0) + 1);
+  }
+  if (counts.size === 0) return [];
+  const top = [...counts].sort(([, a], [, b]) => b - a).slice(0, shown);
+  return [
+    "Errors raised only by fast-publicodes:",
+    ...top.map(([message, count]) => `  ${count} × ${message}`),
+  ];
 }

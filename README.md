@@ -26,3 +26,4 @@ pnpm build:native
 | `pnpm test` | TypeScript tests, including the comparison against publicodes |
 | `FUZZ_SEED=100 pnpm test test/compat/fuzz.test.ts` | Fuzz new seeds; see [docs/testing.md](docs/testing.md) |
 | `cargo test` | Rust tests |
+| `pnpm bench` | Benchmarks against publicodes |

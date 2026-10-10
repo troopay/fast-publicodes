@@ -1,4 +1,4 @@
-import { evaluate } from "../native/index.js";
+import { Engine as NativeEngine } from "../native/index.js";
 
 export type Rules = Record<string, unknown>;
 
@@ -15,15 +15,49 @@ export interface Evaluation {
   missingVariables: Record<string, number>;
 }
 
-export default class Engine {
-  // biome-ignore lint/complexity/noUselessConstructor: publicodes takes rules here
-  constructor(_rules: Rules = {}) {}
+type NativeEvaluation =
+  | { error: string }
+  | {
+      nodeValue: Evaluation["nodeValue"];
+      unit?: Unit;
+      missing: unknown;
+    };
 
-  setSituation(_situation: Situation = {}): this {
+export default class Engine {
+  #native: NativeEngine;
+  #situation: Situation = {};
+
+  constructor(rules: Rules = {}) {
+    this.#native = new NativeEngine(JSON.stringify(rules));
+  }
+
+  setSituation(situation: Situation = {}): this {
+    const error = this.#native.setSituation(JSON.stringify(situation));
+    if (error) throw new Error(error);
+    this.#situation = situation;
     return this;
   }
 
+  getSituation(): Situation {
+    return this.#situation;
+  }
+
   evaluate(expression: string): Evaluation {
-    return JSON.parse(evaluate(expression));
+    const result = this.#native.evaluate(expression) as NativeEvaluation;
+    if ("error" in result) throw new Error(result.error);
+    const native = this.#native;
+    let missingVariables: Record<string, number> | undefined;
+    return {
+      nodeValue: result.nodeValue,
+      ...(result.unit && { unit: result.unit }),
+      // Built on first read: most callers only need the value.
+      get missingVariables() {
+        missingVariables ??= native.missingVariables(result.missing) as Record<
+          string,
+          number
+        >;
+        return missingVariables;
+      },
+    };
   }
 }

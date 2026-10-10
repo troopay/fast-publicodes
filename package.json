@@ -23,7 +23,8 @@
     "build:ts": "tsc -p tsconfig.build.json",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check && biome check && tsc --noEmit",
     "format": "cargo fmt && biome check --write",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "pnpm build:native --release && vitest bench --run --reporter=default"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

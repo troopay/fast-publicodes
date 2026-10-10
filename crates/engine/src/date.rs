@@ -1,0 +1,120 @@
+//! `dd/mm/yyyy` dates, validated and converted with JS `Date` normalization.
+
+use crate::error::{Error, Result};
+
+/// Days since 1970-01-01 of a proleptic Gregorian date; `month` is 1-based.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn civil_day_of(days: i64) -> i64 {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    day_of_year - (153 * month_index + 2) / 5 + 1
+}
+
+/// `new Date(year, month - 1, day)` as days since epoch, or `None` for NaN components.
+fn js_local_date(year: f64, month: f64, day: f64) -> Option<i64> {
+    if !(year.is_finite() && month.is_finite() && day.is_finite()) {
+        return None;
+    }
+    let (year, month, day) = (
+        year.trunc() as i64,
+        month.trunc() as i64,
+        day.trunc() as i64,
+    );
+    let year = if (0..=99).contains(&year) {
+        1900 + year
+    } else {
+        year
+    };
+    let months = year * 12 + (month - 1);
+    let first = days_from_civil(months.div_euclid(12), months.rem_euclid(12) + 1, 1);
+    Some(first + day - 1)
+}
+
+fn js_unary_plus(text: &str) -> f64 {
+    let text = text.trim();
+    if text.is_empty() {
+        return 0.;
+    }
+    text.parse().unwrap_or(f64::NAN)
+}
+
+fn pad(n: f64) -> String {
+    let text = crate::js::number_to_string(n);
+    if n < 10. { format!("0{text}") } else { text }
+}
+
+fn normalize_date(year: f64, month: f64, day: f64) -> Result<String> {
+    match js_local_date(year, month, day) {
+        Some(days) if civil_day_of(days) as f64 == day => {
+            Ok(format!("{}/{}/{}", pad(day), pad(month), pad(year)))
+        }
+        _ => Err(Error::syntax(format!(
+            "La date {}/{}/{} n'est pas valide",
+            crate::js::number_to_string(day),
+            crate::js::number_to_string(month),
+            crate::js::number_to_string(year)
+        ))),
+    }
+}
+
+pub fn normalize_date_string(text: &str) -> Result<String> {
+    let parts: Vec<&str> = text.split('/').collect();
+    let part = |i: usize| parts.get(i).map_or(f64::NAN, |p| js_unary_plus(p));
+    if parts.get(2).is_some_and(|year| !year.is_empty()) {
+        normalize_date(part(2), part(1), part(0))
+    } else {
+        normalize_date(part(1), part(0), 1.)
+    }
+}
+
+/// `convertToDate(value).getTime()`.
+pub fn timestamp(text: &str) -> Result<f64> {
+    let normalized = normalize_date_string(text)?;
+    let parts: Vec<f64> = normalized.split('/').map(js_unary_plus).collect();
+    let days = js_local_date(parts[2], parts[1], parts[0]).unwrap_or_default();
+    Ok(days as f64 * 86_400_000.)
+}
+
+/// Whether `text` matches `/^[\d]{2}\/[\d]{2}\/[\d]{4}$/`.
+pub fn is_date_string(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 10
+        && bytes[2] == b'/'
+        && bytes[5] == b'/'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 2 || i == 5 || b.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_like_js_dates() {
+        assert_eq!(normalize_date_string("1/3/2024").unwrap(), "01/03/2024");
+        assert_eq!(normalize_date_string("03/2024").unwrap(), "01/03/2024");
+        assert!(normalize_date_string("31/02/2024").is_err());
+        assert_eq!(normalize_date_string("29/02/2024").unwrap(), "29/02/2024");
+    }
+
+    #[test]
+    fn timestamps_count_days_from_epoch() {
+        assert_eq!(timestamp("02/01/1970").unwrap(), 86_400_000.);
+    }
+}

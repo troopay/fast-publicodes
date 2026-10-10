@@ -30,4 +30,6 @@ situations:
 | `FUZZ_RUNS` | Number of seeds per suite (default `20`) |
 | `FUZZ_SAVE` | Add each new shrunk situation to its suite, turning it into a regression case |
 
+Each failure lists the differing rules; errors raised only by fast-publicodes are counted by message, which ranks the mechanisms still to port.
+
 publicodes results are cached in `node_modules/.cache/compat`, keyed by publicodes version, harness code, rules and situation, so only the first run of a situation pays for publicodes.

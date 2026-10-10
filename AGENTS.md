@@ -6,7 +6,7 @@ fast-publicodes is an npm package with the same API and behaviour as `publicodes
 
 ## Architecture
 
-- `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript.
+- `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript. `engine.rs` drives rules through `parse` (raw rules to nodes, inline mechanisms expanded), `resolve` (references), `types` (inference) and `evaluate`; it mirrors the `publicodes` source file by file.
 - `crates/node`: napi-rs binding exposing the engine to Node; built into `native/` (addon plus generated JS loader and types).
 - `src/`: the TypeScript package, wrapping the binding behind the `publicodes` API and types; compiled to `dist/`.
 
@@ -22,6 +22,7 @@ Only what an agent needs to place a change correctly. The why is in ADRs.
 | `src/` | TypeScript package source |
 | `test/` | Vitest tests, mirroring `src/` |
 | `test/compat/` | Comparison against `publicodes`; suites (rules and situations) in `suites/` |
+| `bench/` | Benchmarks against `publicodes` |
 | `docs/` | Documentation and ADRs |
 
 One row per top-level directory; deeper only where the tree alone would not tell an agent where a change belongs.
@@ -36,6 +37,7 @@ One row per top-level directory; deeper only where the tree alone would not tell
 | `pnpm lint` | Clippy, rustfmt check, Biome, type check |
 | `pnpm format` | Format Rust and TypeScript |
 | `cargo test -p <crate> [filter]` | Rust tests of one crate, optionally filtered by name |
+| `pnpm bench` | Release build, then benchmarks against `publicodes` on modele-social |
 | `pnpm test [path] [-t <name>]` | Vitest, optionally scoped to a file or directory and to tests whose name matches, e.g. a suite |
 
 Design each command for who runs it: agent-facing commands run without interaction, accept a scope where one applies and print only what an agent needs. Agent-facing commands are listed here, human-facing ones in README.md, shared ones in both.

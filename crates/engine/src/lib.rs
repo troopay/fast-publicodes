@@ -1,23 +1,18 @@
-use std::fmt;
+mod ast;
+mod date;
+mod engine;
+mod error;
+mod evaluate;
+mod expression;
+mod js;
+mod parse;
+mod raw;
+mod resolve;
+mod types;
+mod units;
 
-use serde_json::Value;
-
-#[derive(Debug)]
-pub enum Error {
-    Unsupported(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported(expression) => write!(f, "unsupported expression: {expression}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-/// Evaluates `expression`, returning the evaluation as the JSON object the package exposes.
-pub fn evaluate(expression: &str) -> Result<Value, Error> {
-    Err(Error::Unsupported(expression.to_owned()))
-}
+pub use ast::Value;
+pub use engine::{Engine, Evaluation};
+pub use error::{Error, ErrorKind};
+pub use evaluate::Missing;
+pub use units::Unit;
