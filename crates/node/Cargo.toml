@@ -1,0 +1,18 @@
+[package]
+name = "fast-publicodes-node"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+fast-publicodes-engine = { path = "../engine" }
+napi = { version = "=3.14.2", default-features = false, features = ["napi9"] }
+napi-derive = "=3.6.12"
+
+[build-dependencies]
+napi-build = "=2.6.0"

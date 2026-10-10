@@ -1,0 +1,35 @@
+{
+  "name": "fast-publicodes",
+  "version": "0.1.0",
+  "description": "A drop-in replacement for publicodes, with the engine written in Rust.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "native"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "napi": {
+    "binaryName": "fast-publicodes"
+  },
+  "scripts": {
+    "build": "pnpm build:native --release && pnpm build:ts",
+    "build:native": "napi build --platform --esm --manifest-path crates/node/Cargo.toml --output-dir native --js index.js --dts index.d.ts",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check && biome check && tsc --noEmit",
+    "format": "cargo fmt && biome check --write",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@napi-rs/cli": "3.10.8",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
