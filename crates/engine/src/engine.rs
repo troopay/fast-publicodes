@@ -208,8 +208,8 @@ impl Engine {
         Evaluator::new(&self.program, &mut self.state).evaluate(valeur)
     }
 
-    /// The rule node `expression` evaluates to when it only references a rule; evaluating it
-    /// directly skips parsing the expression.
+    /// The rule node `expression` evaluates to when it only references a rule that no
+    /// replacement applies to; evaluating it directly skips parsing the expression.
     fn referenced_rule(&self, expression: &str) -> Option<NodeId> {
         if !is_reference(expression) {
             return None;
@@ -218,6 +218,10 @@ impl Engine {
         if name == "$EVALUATION" {
             return None;
         }
-        self.program.rule_node(self.program.names.get(&name)?)
+        let id = self.program.names.get(&name)?;
+        if self.program.replacements.contains_key(&id) {
+            return None;
+        }
+        self.program.rule_node(id)
     }
 }

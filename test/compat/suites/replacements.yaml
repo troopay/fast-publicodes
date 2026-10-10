@@ -1,0 +1,67 @@
+rules:
+  salaire:
+    question: Quel salaire ?
+    unité: €/mois
+    par défaut: 2000 €/mois
+  cotisations: salaire * 20%
+  net: salaire - cotisations
+  régime:
+    question: Quel régime ?
+    une possibilité:
+      - général
+      - spécial
+      - agricole
+    par défaut: "'général'"
+  régime . général:
+  régime . spécial:
+  régime . agricole:
+  spécial:
+    applicable si: régime = 'spécial'
+  spécial . cotisations:
+    remplace: cotisations
+    valeur: salaire * 10%
+  agricole:
+    applicable si: régime = 'agricole'
+  agricole . cotisations:
+    remplace:
+      références à: cotisations
+      priorité: 2
+    valeur: salaire * 15%
+  bonus:
+    question: Bonus ?
+    par défaut: non
+  bonus . cotisations:
+    remplace: cotisations
+    valeur: salaire * 5%
+  exonération:
+    question: Exonération ?
+    par défaut: non
+    rend non applicable: cotisations
+  plafond local:
+    remplace:
+      références à: salaire
+      dans: net
+    valeur: 1500 €/mois
+  plafond hors net:
+    remplace:
+      références à: salaire
+      sauf dans:
+        - net
+        - cotisations
+        - spécial
+        - agricole
+        - bonus
+    valeur: 1800 €/mois
+  salaire affiché: salaire
+situations:
+  vide: {}
+  spécial:
+    régime: "'spécial'"
+  agricole et spécial:
+    régime: "'agricole'"
+    bonus: oui
+  bonus:
+    bonus: oui
+  exonération:
+    exonération: oui
+    salaire: 3000

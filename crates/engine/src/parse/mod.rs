@@ -2,6 +2,7 @@
 
 mod inline;
 mod possibilities;
+mod replacements;
 
 use std::collections::HashMap;
 
@@ -459,6 +460,8 @@ impl<'a> Parser<'a> {
                 suggestions.push(self.parse(suggestion)?);
             }
         }
+        let mut replacements = self.parse_replacements(raw.get("rend non applicable"), true)?;
+        replacements.extend(self.parse_replacements(raw.get("remplace"), false)?);
         let declared_type = match raw.get("type").and_then(Raw::as_str) {
             Some("nombre") => Some(Type::Number),
             Some("texte") => Some(Type::String),
@@ -474,6 +477,7 @@ impl<'a> Parser<'a> {
             possibilities,
             parents,
             suggestions,
+            replacements,
             question,
             declared_type,
             reports_missing: false,

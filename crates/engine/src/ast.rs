@@ -78,10 +78,36 @@ pub struct Rule {
     /// References to the ancestors, nearest first.
     pub parents: Vec<NodeId>,
     pub suggestions: Vec<NodeId>,
+    /// `rend non applicable` then `remplace`.
+    pub replacements: Vec<Replacement>,
     pub question: bool,
     pub declared_type: Option<Type>,
     /// Whether an undefined value reports the rule itself as missing.
     pub reports_missing: bool,
+}
+
+/// A `remplace` or `rend non applicable` entry; its nodes are references.
+#[derive(Debug, Clone)]
+pub struct Replacement {
+    pub id: u32,
+    /// The rule that defines the replacement.
+    pub definition: NodeId,
+    pub replaced: NodeId,
+    pub priority: f64,
+    /// `dans`: the rules the replacement is limited to.
+    pub whitelist: Vec<NodeId>,
+    /// `sauf dans`: the rules the replacement skips.
+    pub blacklist: Vec<NodeId>,
+    pub non_applicable: bool,
+}
+
+impl Replacement {
+    pub fn references(&self) -> impl Iterator<Item = NodeId> + '_ {
+        [self.definition, self.replaced]
+            .into_iter()
+            .chain(self.whitelist.iter().copied())
+            .chain(self.blacklist.iter().copied())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +326,12 @@ pub struct Program {
     base_rules: Vec<Option<NodeId>>,
     /// Rules defined by the current situation and evaluations, shadowing the base ones.
     overlay: HashMap<NameId, NodeId>,
+    /// Replacements of the base rules, by replaced rule.
+    pub replacements: HashMap<NameId, Vec<Replacement>>,
+    /// The node each set of applicable replacements turns a reference into, shared by every
+    /// reference it applies to.
+    pub replacement_nodes: HashMap<Vec<u32>, NodeId>,
+    pub next_replacement_id: u32,
 }
 
 impl Program {
@@ -349,14 +381,15 @@ impl Program {
 
     /// Drops every node from `len` on, with the overlay rules.
     pub fn reset_overlay(&mut self, len: usize) {
-        self.nodes.truncate(len);
-        self.types.truncate(len);
+        self.truncate(len);
         self.overlay.clear();
     }
 
     pub fn truncate(&mut self, len: usize) {
         self.nodes.truncate(len);
         self.types.truncate(len);
+        self.replacement_nodes
+            .retain(|_, node| (node.0 as usize) < len);
     }
 }
 

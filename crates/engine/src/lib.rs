@@ -1,4 +1,5 @@
 mod ast;
+mod collation;
 mod date;
 mod engine;
 mod error;
@@ -7,6 +8,7 @@ mod expression;
 mod js;
 mod parse;
 mod raw;
+mod replace;
 mod resolve;
 mod types;
 mod units;

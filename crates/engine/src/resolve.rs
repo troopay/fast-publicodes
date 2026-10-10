@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::ast::{NameId, Node, NodeId, Program, rule_parents};
 use crate::error::{Error, Result};
 use crate::parse::Batch;
+use crate::replace::inline_replacements;
 use crate::types::infer_rule_types;
 
 /// The rules references resolve against: the defined ones, shadowed by those being added.
@@ -96,6 +97,8 @@ impl Scope<'_> {
 struct Resolver<'a> {
     program: &'a mut Program,
     batch: HashMap<NameId, NodeId>,
+    /// `(rule, referenced rule)` for every reference resolved outside replacements.
+    uses: Vec<(NameId, NameId)>,
 }
 
 impl Resolver<'_> {
@@ -106,22 +109,38 @@ impl Resolver<'_> {
         }
     }
 
+    fn resolve_reference(&mut self, id: NodeId) -> Result<Option<NameId>> {
+        let Node::Reference(reference) = self.program.node(id) else {
+            return Ok(None);
+        };
+        if let Some(target) = reference.target {
+            return Ok(Some(target));
+        }
+        let from = self.program.names.name(reference.context).to_owned();
+        let target = self.scope().disambiguate(&from, &reference.name)?;
+        let target = self.program.names.intern(&target);
+        if let Node::Reference(r) = self.program.node_mut(id) {
+            r.target = Some(target);
+        }
+        Ok(Some(target))
+    }
+
     fn resolve(&mut self, id: NodeId) -> Result<NodeId> {
         let node = self.program.node(id).clone();
         match node {
             Node::Reference(reference) => {
-                if reference.target.is_none() {
-                    let from = self.program.names.name(reference.context).to_owned();
-                    let target = self.scope().disambiguate(&from, &reference.name)?;
-                    let target = self.program.names.intern(&target);
-                    if let Node::Reference(r) = self.program.node_mut(id) {
-                        r.target = Some(target);
-                    }
+                if let Some(target) = self.resolve_reference(id)? {
+                    self.uses.push((reference.context, target));
                 }
                 Ok(id)
             }
             Node::Constant(_) => Ok(id),
             other => {
+                if let Node::Rule(rule) = &other {
+                    for reference in rule.replacements.iter().flat_map(|r| r.references()) {
+                        self.resolve_reference(reference)?;
+                    }
+                }
                 let copy = other.map_children(|child| self.resolve(child))?;
                 Ok(self.program.push(copy))
             }
@@ -161,6 +180,7 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
     let mut resolver = Resolver {
         batch: rules.iter().copied().collect(),
         program,
+        uses: Vec::new(),
     };
     let mut resolved = Vec::with_capacity(rules.len());
     for &(name, draft) in &rules {
@@ -184,6 +204,8 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
         }
         resolved.push((name, node));
     }
+    let uses = std::mem::take(&mut resolver.uses);
+    inline_replacements(program, &mut resolved, &uses, overlay)?;
     for &(name, node) in &resolved {
         program.define(name, node, overlay);
     }
