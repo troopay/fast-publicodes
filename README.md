@@ -2,6 +2,11 @@
 
 A drop-in replacement for [publicodes](https://publi.codes) 1.x: the same API and behaviour, with the engine written in Rust. Node loads it as a native addon; browsers and other runtimes load it as WebAssembly, from the same package.
 
+## Limitations
+
+- **No AST.** `evaluate()` returns `nodeValue`, `unit` and `missingVariables` without `explanation`, and rules returned by `getRule()` and `getParsedRules()` carry their metadata without their node tree. `parsePublicodes`, `reduceAST`, `transformAST`, `traverseASTNode`, `utils.cyclicDependencies`, `utils.disambiguateReferenceNode` and `utils.updateReferencesMapsFromReferenceNode` are not provided, and `evaluate()` does not accept an AST node.
+- **No internal fields.** The members `publicodes` marks as internal (`context`, `baseContext`, `publicParsedRules`, `cache` and `evaluateNode`) do not exist.
+
 ## Requirements
 
 - Node 22+

@@ -4,6 +4,7 @@ import { fromNative, type NativeError } from "./error.js";
 import * as utils from "./ruleUtils.js";
 
 export { isPublicodesError, PublicodesError } from "./error.js";
+export { serializeEvaluation, simplifyNodeUnit } from "./evaluation.js";
 export { capitalise0, formatValue } from "./format.js";
 export type * from "./types.js";
 export { parseUnit, serializeUnit, type Unit } from "./units.js";

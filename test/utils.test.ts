@@ -87,6 +87,37 @@ describe("units", () => {
   );
 });
 
+describe("evaluations", () => {
+  const ruleSet = {
+    "non applicable": { "applicable si": "non", valeur: 1 },
+    "non défini": { question: "?" },
+  };
+  test.each([
+    "42 €/mois * 1 an",
+    "1500 €/mois",
+    "10 %",
+    "50 % * 20 %",
+    "3 km / 30 min",
+    "1.5 kg",
+    "3",
+    "oui",
+    "'texte'",
+    "12/03/2024",
+    "non applicable",
+    "non défini",
+  ])("%j", (expression) => {
+    same((module) => {
+      const engine =
+        module === fast
+          ? new fast.Engine(ruleSet)
+          : new PublicodesEngine(ruleSet as never);
+      const evaluation = engine.evaluate(expression) as never;
+      const { nodeValue, unit } = module.simplifyNodeUnit(evaluation);
+      return [{ nodeValue, unit }, module.serializeEvaluation(evaluation)];
+    });
+  });
+});
+
 describe("formatValue", () => {
   test.each<[unknown, object?]>([
     [1234.5678],
