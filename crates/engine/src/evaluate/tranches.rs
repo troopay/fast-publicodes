@@ -5,8 +5,8 @@ use super::{Evaluated, Evaluator, Missing, UnitSlot};
 use std::rc::Rc;
 
 use crate::ast::{NodeId, Tranche, TrancheMechanism, Value};
-use crate::error::{Error, Result};
-use crate::units::{Unit, UnitOperator, convert_unit, infer_unit, parse_unit};
+use crate::error::{Error, Result, WarningKind};
+use crate::units::{Unit, UnitOperator, check_convertible, convert_unit, infer_unit, parse_unit};
 
 /// A tranche after its bounds were evaluated. `None` stands for JS `undefined`.
 struct Bounded {
@@ -62,11 +62,22 @@ impl Evaluator<'_> {
                     UnitOperator::Times,
                     [plafond.unit.get(), multiplicateur.unit.get()],
                 );
-                if let Some(value) = plafond_value
-                    && let Ok(converted) =
-                        convert_unit(from.as_deref(), assiette.unit.unit(), value)
-                {
-                    plafond_value = Some(converted);
+                let converted = match plafond_value {
+                    Some(value) => {
+                        convert_unit(from.as_deref(), assiette.unit.unit(), value).map(Some)
+                    }
+                    None => check_convertible(from.as_deref(), assiette.unit.unit()).map(|()| None),
+                };
+                match converted {
+                    Ok(converted) => plafond_value = converted,
+                    Err(error) => self.warn(
+                        WarningKind::UnitConversion,
+                        format!(
+                            "L'unité du plafond de la tranche n°{}  n'est pas compatible avec celle l'assiette",
+                            i + 1
+                        ),
+                        Some(error),
+                    ),
                 }
             }
             let plancher_value = match previous {

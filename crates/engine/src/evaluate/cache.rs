@@ -4,7 +4,7 @@ use super::Evaluated;
 use crate::ast::NodeId;
 
 /// Evaluated nodes. A sub-engine can read the entries of the engines it was lent by.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Cache {
     entries: FxHashMap<NodeId, Evaluated>,
     /// Entries lent by enclosing engines, innermost last.

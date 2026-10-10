@@ -317,7 +317,7 @@ pub fn parse_expression(expression: &str, rule: &str) -> Result<Raw> {
             }
         });
         Error::syntax(format!(
-            "L'expression suivante n'est pas valide :\n   {single_line}\n   {pointer}^\n   {message}\n"
+            "L'expression suivante n'est pas valide :\n   \n   {single_line}\n   {pointer}^\n   {message}\n"
         ))
         .in_rule(rule)
     })

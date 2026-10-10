@@ -4,10 +4,10 @@ use super::js_value::{compare, power, strict_equals, to_js_string, to_number, tr
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Operator, Value};
 use crate::date::{is_date_string, timestamp};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, WarningKind};
 use std::rc::Rc;
 
-use crate::units::{Unit, UnitOperator, UnitRef, infer_unit, is_percent};
+use crate::units::{Unit, UnitOperator, UnitRef, infer_unit, is_percent, serialize_unit};
 
 /// An operand: a node, or a value built by the engine.
 pub enum Operand {
@@ -150,16 +150,33 @@ impl Evaluator<'_> {
             && is_percent(right.unit.unit())
             && !is_percent(left.unit.unit());
         if !undefined && !matches!(operator, Divide | Times | IntegerDivide) && !with_percentage {
-            if let Some(unit) = left.unit.get().cloned() {
-                if !matches!(right.unit, UnitSlot::Absent)
-                    && let Ok(converted) = self.convert_node(Some(&unit), &right)
-                {
-                    right = converted;
+            let conversion = if let Some(unit) = left.unit.get().cloned() {
+                if matches!(right.unit, UnitSlot::Absent) {
+                    Ok(())
+                } else {
+                    self.convert_node(Some(&unit), &right)
+                        .map(|converted| right = converted)
                 }
-            } else if let Some(unit) = right.unit.get().cloned()
-                && let Ok(converted) = self.convert_node(Some(&unit), &left)
-            {
-                left = converted;
+            } else if let Some(unit) = right.unit.get().cloned() {
+                self.convert_node(Some(&unit), &left)
+                    .map(|converted| left = converted)
+            } else {
+                Ok(())
+            };
+            if let Err(error) = conversion {
+                let unit = |slot: &UnitSlot| {
+                    serialize_unit(slot.unit()).unwrap_or_else(|| "undefined".to_owned())
+                };
+                self.warn(
+                    WarningKind::UnitConversion,
+                    format!(
+                        "Dans l'expression '{}', la partie gauche (unité: {}) n'est pas compatible avec la partie droite (unité: {})",
+                        operator.key(),
+                        unit(&left.unit),
+                        unit(&right.unit)
+                    ),
+                    Some(error),
+                );
             }
         }
         let mut value = if undefined {

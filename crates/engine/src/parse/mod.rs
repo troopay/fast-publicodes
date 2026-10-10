@@ -99,6 +99,8 @@ pub struct Parser<'a> {
     templates: &'a Templates,
     context: String,
     pub batch: Batch,
+    /// Whether to record the source arguments of inline mechanisms.
+    pub source_args: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -108,6 +110,7 @@ impl<'a> Parser<'a> {
             templates,
             context: context.to_owned(),
             batch: Batch::default(),
+            source_args: false,
         }
     }
 
@@ -558,7 +561,12 @@ impl<'a> Parser<'a> {
         value.insert(0, ("avec".into(), Raw::Map(Rc::new(avec))));
         let valeur = self.parse(&Raw::Map(Rc::new(value)))?;
 
-        let parents = rule_parents(dotted_name)
+        let ancestors = if self.program.options.automatic_namespace_disabling {
+            rule_parents(dotted_name)
+        } else {
+            Vec::new()
+        };
+        let parents = ancestors
             .into_iter()
             .map(|parent| {
                 let target = self.program.names.intern(parent);
@@ -606,8 +614,37 @@ impl<'a> Parser<'a> {
             declared_type,
             reports_missing: false,
             is_situation,
+            names_evaluation: !is_situation && !dotted_name.contains("$INTERNAL"),
             situation,
+            title: capitalise0(&match raw.get("titre") {
+                Some(titre) if !matches!(titre, Raw::Null) => {
+                    crate::evaluate::to_js_string(&raw_value(titre))
+                }
+                _ => dotted_name.rsplit(" . ").next().unwrap_or("").to_owned(),
+            }),
+            experimental: raw.get("experimental").is_some_and(Raw::is_oui),
+            raw: raw.clone(),
         }))))
+    }
+}
+
+/// `capitalise0`: the text with its first letter in uppercase.
+pub fn capitalise0(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// A raw scalar as the value it denotes.
+fn raw_value(raw: &Raw) -> Value {
+    match raw {
+        Raw::String(text) => Value::String(text.clone()),
+        Raw::Number(n) => Value::Number(*n),
+        Raw::Bool(b) => Value::Bool(*b),
+        Raw::Null => Value::Null,
+        _ => Value::String("[object Object]".into()),
     }
 }
 

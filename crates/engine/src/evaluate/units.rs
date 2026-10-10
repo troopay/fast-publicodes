@@ -3,7 +3,7 @@
 use super::js_value::{to_number, truthy};
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
-use crate::error::Result;
+use crate::error::{Result, WarningKind};
 use std::rc::Rc;
 
 use crate::units::{Unit, UnitRef, check_convertible, convert_unit, simplify_unit};
@@ -36,10 +36,15 @@ impl Evaluator<'_> {
     pub(super) fn unite(&mut self, unit: &UnitRef, valeur: NodeId) -> Result<Evaluated> {
         let valeur = self.evaluate(valeur)?;
         let mut value = valeur.value.clone();
-        if value != Value::Null
-            && let Ok(converted) = convert_value(valeur.unit.unit(), Some(unit), &value)
-        {
-            value = converted;
+        if value != Value::Null {
+            match convert_value(valeur.unit.unit(), Some(unit), &value) {
+                Ok(converted) => value = converted,
+                Err(error) => self.warn(
+                    WarningKind::UnitConversion,
+                    "Erreur lors de la conversion d'unité explicite".to_owned(),
+                    Some(error),
+                ),
+            }
         }
         Ok(Evaluated {
             value,

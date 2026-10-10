@@ -3,16 +3,20 @@
 use rustc_hash::FxHashMap;
 
 use super::{Parser, default_constant};
-use crate::ast::{Constant, Node, NodeId, Program, Value};
+use crate::ast::{Constant, Node, NodeId, Program, SourceArgs, Value};
 use crate::error::{Error, Result};
 use crate::raw::Raw;
 
 /// A template is parsed once; each use copies it with its arguments substituted.
+#[derive(Clone)]
 struct Template {
     body: NodeId,
     args: &'static [&'static str],
+    /// The path from the body to a use of each argument.
+    paths: Vec<Box<[u16]>>,
 }
 
+#[derive(Clone)]
 pub struct Templates {
     not_applicable: NodeId,
     templates: FxHashMap<&'static str, Template>,
@@ -119,7 +123,20 @@ impl Templates {
         for (name, args, body) in TEMPLATES {
             let body =
                 Parser::new(program, &templates, INLINE_CONTEXT).parse(&body(not_applicable))?;
-            templates.templates.insert(name, Template { body, args });
+            let paths = args
+                .iter()
+                .map(|arg| {
+                    path_to(
+                        program,
+                        body,
+                        |_, node| matches!(node, Node::Reference(r) if r.name == *arg),
+                    )
+                    .expect("templates use each argument")
+                })
+                .collect();
+            templates
+                .templates
+                .insert(name, Template { body, args, paths });
         }
         Ok(templates)
     }
@@ -135,14 +152,26 @@ impl Parser<'_> {
                 value.clone()
             };
             let mut args = FxHashMap::default();
+            let mut paths = Vec::new();
             if let Raw::Map(entries) = &provided {
                 for (name, raw) in entries.iter() {
                     let node = self.parse(raw)?;
                     args.insert(name.to_string(), node);
+                    if self.source_args
+                        && let Some(index) = template.args.iter().position(|arg| **arg == **name)
+                    {
+                        paths.push(template.paths[index].clone());
+                    }
                 }
             }
             let (body, declared) = (template.body, template.args);
-            return self.substitute(key, body, declared, &args).map(Some);
+            let node = self.substitute(key, body, declared, &args)?;
+            if self.source_args {
+                self.program
+                    .source_args
+                    .insert(node, SourceArgs::Inline(paths.into()));
+            }
+            return Ok(Some(node));
         }
         let list = match key {
             "somme"
@@ -155,6 +184,13 @@ impl Parser<'_> {
             | "le minimum de" => self.parse_list(value)?,
             _ => return Ok(None),
         };
+        let items: Vec<NodeId> = list
+            .iter()
+            .filter_map(|item| match item {
+                Raw::Node(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
         let na = self.templates.not_applicable;
         let body = match key {
             "somme" => sum(list, na),
@@ -183,7 +219,17 @@ impl Parser<'_> {
             }),
             _ => extremum(list, na, if key == "le maximum de" { ">" } else { "<" }),
         };
-        self.parse(&body).map(Some)
+        let node = self.parse(&body)?;
+        if self.source_args {
+            let paths = items
+                .into_iter()
+                .filter_map(|item| path_to(self.program, node, |id, _| id == item))
+                .collect::<Vec<_>>();
+            self.program
+                .source_args
+                .insert(node, SourceArgs::Inline(paths.into()));
+        }
+        Ok(Some(node))
     }
 
     fn parse_list(&mut self, value: &Raw) -> Result<Vec<Raw>> {
@@ -223,6 +269,35 @@ impl Parser<'_> {
             }
         }
     }
+}
+
+/// The child indices leading from `root` to the first node, depth first, that `is_target`
+/// accepts.
+fn path_to(
+    program: &Program,
+    root: NodeId,
+    is_target: impl Fn(NodeId, &Node) -> bool,
+) -> Option<Box<[u16]>> {
+    fn walk(
+        program: &Program,
+        id: NodeId,
+        is_target: &impl Fn(NodeId, &Node) -> bool,
+        path: &mut Vec<u16>,
+    ) -> bool {
+        if is_target(id, program.node(id)) {
+            return true;
+        }
+        for (index, child) in program.node(id).children().into_iter().enumerate() {
+            path.push(index as u16);
+            if walk(program, child, is_target, path) {
+                return true;
+            }
+            path.pop();
+        }
+        false
+    }
+    let mut path = Vec::new();
+    walk(program, root, &is_target, &mut path).then(|| path.into_boxed_slice())
 }
 
 /// `reduceToSumNodes`: `a + (b + (c + non applicable))`.

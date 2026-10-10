@@ -20,7 +20,7 @@ const silent = { log() {}, warn() {}, error() {} };
 
 const engines = {
   publicodes: () => new PublicodesEngine(rules, { logger: silent }),
-  "fast-publicodes": () => new FastEngine(rules),
+  "fast-publicodes": () => new FastEngine(rules, { logger: silent }),
 };
 const names = Object.keys(engines.publicodes().getParsedRules());
 

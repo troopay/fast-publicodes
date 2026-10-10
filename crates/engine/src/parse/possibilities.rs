@@ -2,13 +2,14 @@
 
 use super::Parser;
 use crate::ast::{Node, NodeId, PossibilityKind, Type, Value};
-use crate::error::Result;
+use crate::error::{Result, WarningKind};
 use std::rc::Rc;
 
 use crate::raw::{Entries, Raw};
 use crate::units::{UnitRef, convert_unit, serialize_unit};
 
 struct Possibility {
+    not_applicable: Option<NodeId>,
     node: NodeId,
     kind: PossibilityKind,
     unit: Option<UnitRef>,
@@ -24,13 +25,23 @@ impl Parser<'_> {
         avec: &mut Entries,
     ) -> Result<Option<NodeId>> {
         let mut possibilities = None;
-        for key in ["valeur", "formule"] {
+        for (key, message) in [
+            (
+                "valeur",
+                "La clé 'une possibilité' à l'intérieur de la clé 'valeur' est dépréciée, veuillez la déplacer\nau niveau supérieur.",
+            ),
+            (
+                "formule",
+                "La clé 'une possibilité' à l'intérieur de la clé 'formule' est dépréciée, veuillez la déplacer au niveau supérieur.",
+            ),
+        ] {
             if let Some(Raw::Map(entries)) = raw.get_mut(key)
                 && let Some(index) = entries
                     .iter()
                     .position(|(k, v)| &**k == "une possibilité" && v.is_truthy())
             {
                 possibilities = Some(Rc::make_mut(entries).remove(index).1);
+                self.deprecated(message.to_owned());
             }
         }
         if let Some(value) = raw.get("une possibilité") {
@@ -43,6 +54,30 @@ impl Parser<'_> {
             return Ok(None);
         };
         if let Some(inner) = list.get("possibilités") {
+            let message = match list.get("choix obligatoire") {
+                Some(choice) if choice.is_truthy() => {
+                    let names: Vec<String> = match inner {
+                        Raw::List(items) => items
+                            .iter()
+                            .map(|item| item.as_str().unwrap_or("[object Object]").to_owned())
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    let hint = if choice.as_str() == Some("non") {
+                        format!(
+                            "Pour ajouter un choix « aucun », « non applicable » ou « autre » à la liste des possibilité, créer explicitement une règle dédiée. Par exemple : \n`une possibilité: [{}, aucun]`\n",
+                            names.join(", ")
+                        )
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "Les clés 'choix obligatoire' et 'possibilités' à l'intérieur de 'une possibilité' sont dépréciées. \nDéplacez les possibilités directement à la racine de 'une possibilité' .{hint}"
+                    )
+                }
+                _ => "La clé 'possibilités' à l'intérieur de 'une possibilité' est dépréciée. \nDéplacez les possibilités directement à la racine de 'une possibilité'\n".to_owned(),
+            };
+            self.deprecated(message);
             list = inner.clone();
         }
         if !list.is_truthy() {
@@ -113,8 +148,19 @@ impl Parser<'_> {
         Ok(Some(self.push(Node::UnePossibilite {
             kind,
             unit,
+            values: options.iter().map(|o| o.publicodes_value.clone()).collect(),
+            not_applicable: options.iter().map(|o| o.not_applicable).collect(),
             options: options.iter().map(|o| o.node).collect(),
         })))
+    }
+
+    fn deprecated(&self, message: String) {
+        self.program.warn(
+            WarningKind::DeprecatedSyntax,
+            message,
+            Some(self.context.clone()),
+            None,
+        );
     }
 
     fn parse_option(&mut self, item: &Raw, avec: &mut Entries) -> Result<Possibility> {
@@ -138,7 +184,16 @@ impl Parser<'_> {
             Node::Reference(reference) => {
                 let publicodes_value = format!("'{}'", reference.name);
                 let value = Value::String(reference.name.as_str().into());
+                let not_applicable = self
+                    .program
+                    .options
+                    .filter_not_applicable_possibilities
+                    .then(|| {
+                        let copy = self.push(Node::Reference(reference.clone()));
+                        self.push(Node::EstNonApplicable(copy))
+                    });
                 Ok(Possibility {
+                    not_applicable,
                     node: self.push(Node::Reference(reference)),
                     kind: PossibilityKind::Reference,
                     unit: None,
@@ -163,6 +218,7 @@ impl Parser<'_> {
                     _ => String::new(),
                 };
                 Ok(Possibility {
+                    not_applicable: None,
                     node,
                     kind,
                     unit: constant.unit,

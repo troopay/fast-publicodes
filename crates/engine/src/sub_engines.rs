@@ -24,7 +24,7 @@ fn copy_tree(program: &mut Program, id: NodeId) -> NodeId {
             let copy = node
                 .map_children(|child| Ok::<_, std::convert::Infallible>(copy_tree(program, child)))
                 .unwrap_or_else(|never| match never {});
-            program.push(copy)
+            program.push_copy(id, copy)
         }
     }
 }

@@ -16,14 +16,14 @@ mod variations;
 use rustc_hash::FxHashMap;
 
 pub use condition::Branch;
-pub use js_value::to_number;
+pub use js_value::{to_js_string, to_number};
 pub use missing::Missing;
 pub use operation::Operand;
 
 use cache::Cache;
 
 use crate::ast::{NameId, Node, NodeId, PossibilityKind, Program, TextPart, Value};
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result, WarningKind};
 use crate::format::format_value;
 use crate::units::{Unit, UnitRef};
 
@@ -77,7 +77,7 @@ impl Evaluated {
 }
 
 /// The state of an engine for its situation: caches, stacks and sub-engines.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EvalState {
     cache: Cache,
     rule_stack: Vec<NameId>,
@@ -91,6 +91,8 @@ pub struct EvalState {
     /// The amended situation this sub-engine evaluates a `contexte` in.
     contexte_situation: Option<Vec<(NameId, u64)>>,
     inversion_fail: bool,
+    /// The last rule evaluated, which warnings name.
+    pub evaluated_rule: Option<NameId>,
 }
 
 impl EvalState {
@@ -124,6 +126,7 @@ impl EvalState {
             },
             layers: self.layers.clone(),
             inputs: self.inputs.clone(),
+            evaluated_rule: self.evaluated_rule,
             ..EvalState::default()
         }
     }
@@ -137,6 +140,14 @@ pub struct Evaluator<'a> {
 impl<'a> Evaluator<'a> {
     pub fn new(program: &'a Program, state: &'a mut EvalState) -> Self {
         Self { program, state }
+    }
+
+    pub fn warn(&self, kind: WarningKind, message: String, cause: Option<Error>) {
+        let rule = self
+            .state
+            .evaluated_rule
+            .map(|name| self.program.names.name(name).to_owned());
+        self.program.warn(kind, message, rule, cause);
     }
 
     /// The rule node defining `name` for this engine.
@@ -257,10 +268,34 @@ impl<'a> Evaluator<'a> {
                 kind,
                 unit,
                 options,
+                not_applicable,
+                ..
             } => {
-                let value = match (kind, options.as_slice()) {
-                    (PossibilityKind::Reference, []) => Value::Null,
-                    (PossibilityKind::Reference, [only]) => match program.node(*only) {
+                if *kind != PossibilityKind::Reference {
+                    return Ok(Evaluated {
+                        value: Value::Undefined,
+                        unit: UnitSlot::if_defined(unit.clone()),
+                        missing: Missing::default(),
+                    });
+                }
+                let mut missing = Missing::default();
+                let mut applicable = Vec::new();
+                for (&option, not_applicable) in options.iter().zip(not_applicable) {
+                    let excluded = match not_applicable {
+                        Some(node) => {
+                            let evaluated = self.evaluate(*node)?;
+                            missing = missing.merge(&evaluated.missing);
+                            evaluated.value == Value::Bool(true)
+                        }
+                        None => false,
+                    };
+                    if !excluded {
+                        applicable.push(option);
+                    }
+                }
+                let value = match applicable.as_slice() {
+                    [] => Value::Null,
+                    [only] => match program.node(*only) {
                         Node::Reference(reference) => Value::String(reference.name.as_str().into()),
                         _ => Value::Undefined,
                     },
@@ -269,7 +304,7 @@ impl<'a> Evaluator<'a> {
                 Ok(Evaluated {
                     value,
                     unit: UnitSlot::if_defined(unit.clone()),
-                    missing: Missing::default(),
+                    missing,
                 })
             }
             Node::Contexte { valeur, pairs, id } => self.contexte(*valeur, pairs, *id),

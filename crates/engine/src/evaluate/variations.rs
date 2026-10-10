@@ -1,6 +1,6 @@
 use super::{Evaluated, Evaluator, Missing, UnitSlot};
 use crate::ast::{Branch, Value};
-use crate::error::Result;
+use crate::error::{Result, WarningKind};
 use crate::units::UnitRef;
 
 impl Evaluator<'_> {
@@ -10,7 +10,7 @@ impl Evaluator<'_> {
         // `None` is JS `undefined`: a previous condition could not be evaluated.
         let mut previous = Some(false);
         let mut missing = Missing::default();
-        for branch in branches {
+        for (i, branch) in branches.iter().enumerate() {
             if previous == Some(true) {
                 continue;
             }
@@ -20,21 +20,31 @@ impl Evaluator<'_> {
                 (None, _) | (_, Value::Undefined) => None,
                 _ => Some(satisfied),
             };
-            missing = missing.merge(&condition.missing.bonus());
+            let mut branch_missing = condition.missing.bonus();
             if current == Some(false) {
+                missing = missing.merge(&branch_missing);
                 continue;
             }
             let mut consequence = None;
             if satisfied {
                 let mut evaluated = self.evaluate(branch.consequence)?;
-                if let Some(unit) = &unit
-                    && let Ok(converted) = self.convert_node(Some(unit), &evaluated)
-                {
-                    evaluated = converted;
+                if let Some(unit) = &unit {
+                    match self.convert_node(Some(unit), &evaluated) {
+                        Ok(converted) => evaluated = converted,
+                        Err(error) => self.warn(
+                            WarningKind::UnitConversion,
+                            format!(
+                                "L'unité de la branche n° {} du mécanisme 'variations' n'est pas compatible avec celle d'une branche précédente",
+                                i + 1
+                            ),
+                            Some(error),
+                        ),
+                    }
                 }
-                missing = missing.merge(&evaluated.missing);
+                branch_missing = branch_missing.merge(&evaluated.missing);
                 consequence = Some(evaluated);
             }
+            missing = missing.merge(&branch_missing);
             value = match (current, &consequence) {
                 (Some(true), Some(consequence)) => consequence.value.clone(),
                 _ => Value::Undefined,

@@ -6,7 +6,7 @@ fast-publicodes is an npm package with the same API and behaviour as `publicodes
 
 ## Architecture
 
-- `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript. `engine.rs` drives rules through `parse` (raw rules to nodes, inline mechanisms expanded), `resolve` (references), `replace` (`remplace` and `rend non applicable`), `types` (inference), `sub_engines` (rules for `contexte` and inversions) and `evaluate`; it mirrors the `publicodes` source file by file.
+- `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript. `engine/` (rules, situation, evaluation entry points) drives rules through `parse` (raw rules to nodes, inline mechanisms expanded), `resolve` (references), `replace` (`remplace` and `rend non applicable`), `types` (inference), `sub_engines` (rules for `contexte` and inversions) and `evaluate`; it mirrors the `publicodes` source file by file.
 - `crates/node`: napi-rs binding exposing the engine to Node; built into `native/` (addon plus generated JS loader and types).
 - `src/`: the TypeScript package, wrapping the binding behind the `publicodes` API and types; compiled to `dist/`.
 

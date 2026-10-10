@@ -76,6 +76,24 @@ impl Raw {
     }
 }
 
+impl Raw {
+    pub fn to_json(&self) -> Json {
+        match self {
+            Raw::Null | Raw::Node(_) => Json::Null,
+            Raw::Bool(b) => Json::Bool(*b),
+            Raw::Number(n) => serde_json::Number::from_f64(*n).map_or(Json::Null, Json::Number),
+            Raw::String(s) => Json::String(s.to_string()),
+            Raw::List(items) => Json::Array(items.iter().map(Raw::to_json).collect()),
+            Raw::Map(entries) => Json::Object(
+                entries
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect(),
+            ),
+        }
+    }
+}
+
 impl From<&Json> for Raw {
     fn from(value: &Json) -> Self {
         match value {

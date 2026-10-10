@@ -5,14 +5,14 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import PublicodesEngine from "publicodes";
 import { parse, parseDocument } from "yaml";
-import Engine, { type Rules, type Situation } from "../../src/index.js";
+import Engine, { type RawPublicodes, type Situation } from "../../src/index.js";
 import { evaluateAll, type Outcomes } from "./outcome.js";
 
 /** A rule set with named situations, loaded from `suites/<name>.yaml`. */
 export interface Suite {
   name: string;
   file: string;
-  rules: Rules;
+  rules: RawPublicodes;
   situations: Record<string, Situation>;
   oracle(): PublicodesEngine;
   candidate(): Engine;
@@ -35,7 +35,7 @@ export async function loadSuites(): Promise<Suite[]> {
     files.sort().map(async (file) => {
       const path = fileURLToPath(new URL(file, SUITES_DIR));
       const source = parse(await readFile(path, "utf8"));
-      const rules: Rules =
+      const rules: RawPublicodes =
         typeof source.rules === "string"
           ? (await import(source.rules)).default
           : source.rules;
@@ -51,7 +51,7 @@ export async function loadSuites(): Promise<Suite[]> {
               { logger: silent },
             ),
         ),
-        candidate: once(() => new Engine(rules)),
+        candidate: once(() => new Engine(rules, { logger: silent })),
         cacheKey: hash(
           version,
           harnessHash,

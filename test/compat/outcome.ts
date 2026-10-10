@@ -1,11 +1,11 @@
 import { inspect, isDeepStrictEqual } from "node:util";
 import { serializeUnit } from "publicodes";
-import type { Evaluation, Situation } from "../../src/index.js";
+import type { EvaluatedNode, Situation } from "../../src/index.js";
 
 export type Outcome =
   | { error: string }
   | {
-      nodeValue?: Evaluation["nodeValue"];
+      nodeValue?: EvaluatedNode["nodeValue"];
       unit?: string;
       missingVariables: Record<string, number>;
     };
@@ -20,7 +20,7 @@ export interface Mismatch {
 
 interface EvaluatingEngine {
   setSituation(situation: Situation): unknown;
-  evaluate(expression: string): Evaluation;
+  evaluate(expression: string): EvaluatedNode;
 }
 
 const RELATIVE_TOLERANCE = 1e-9;

@@ -62,6 +62,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "rustc-hash",
  "serde_json",
 ]
 

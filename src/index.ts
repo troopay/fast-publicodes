@@ -1,73 +1,27 @@
-import { Engine as NativeEngine } from "../native/index.js";
+import { parseExpression as nativeParseExpression } from "../native/index.js";
+import { Engine } from "./engine.js";
+import { fromNative, type NativeError } from "./error.js";
+import * as utils from "./ruleUtils.js";
 
-export type Rules = Record<string, unknown>;
+export { isPublicodesError, PublicodesError } from "./error.js";
+export { capitalise0, formatValue } from "./format.js";
+export type * from "./types.js";
+export { parseUnit, serializeUnit, type Unit } from "./units.js";
+export { Engine, utils };
+export default Engine;
 
-export type Situation = Record<string, string | number>;
+/** The tree of a publicodes expression, as `publicodes` writes it. */
+export type ExprAST = Record<string, unknown>;
 
-export interface Unit {
-  numerators: string[];
-  denominators: string[];
-}
-
-export interface Evaluation {
-  nodeValue: number | string | boolean | null | undefined;
-  unit?: Unit;
-  missingVariables: Record<string, number>;
-}
-
-function today(): string {
-  const date = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
-}
-
-type NativeEvaluation =
-  | { error: string }
-  | {
-      nodeValue: Evaluation["nodeValue"];
-      unit?: Unit;
-      missing: unknown;
-    };
-
-export default class Engine {
-  #native: NativeEngine;
-  #situation: Situation = {};
-
-  constructor(rules: Rules = {}) {
-    this.#native = new NativeEngine(JSON.stringify(rules), today());
+export function parseExpression(
+  expression: string,
+  dottedName = "<expression>",
+): ExprAST {
+  const result = nativeParseExpression(expression, dottedName) as
+    | { error: string }
+    | { expression: string };
+  if ("error" in result) {
+    throw fromNative(JSON.parse(result.error) as NativeError);
   }
-
-  setSituation(situation: Situation = {}): this {
-    const error = this.#native.setSituation(JSON.stringify(situation));
-    if (error) throw new Error(error);
-    this.#situation = situation;
-    return this;
-  }
-
-  getSituation(): Situation {
-    return this.#situation;
-  }
-
-  inversionFail(): boolean {
-    return this.#native.inversionFail();
-  }
-
-  evaluate(expression: string): Evaluation {
-    const result = this.#native.evaluate(expression) as NativeEvaluation;
-    if ("error" in result) throw new Error(result.error);
-    const native = this.#native;
-    let missingVariables: Record<string, number> | undefined;
-    return {
-      nodeValue: result.nodeValue,
-      ...(result.unit && { unit: result.unit }),
-      // Built on first read: most callers only need the value.
-      get missingVariables() {
-        missingVariables ??= native.missingVariables(result.missing) as Record<
-          string,
-          number
-        >;
-        return missingVariables;
-      },
-    };
-  }
+  return JSON.parse(result.expression);
 }

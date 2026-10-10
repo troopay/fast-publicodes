@@ -3,8 +3,11 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Ordering;
+use std::rc::Rc;
 
-use crate::ast::{Branch, ContextePair, NameId, Node, NodeId, Program, Replacement, Value};
+use crate::ast::{
+    Branch, ContextePair, NameId, Node, NodeId, Program, Replacement, SourceArgs, Value,
+};
 use crate::collation::{Weights, weights};
 use crate::error::{Error, ErrorKind, Result};
 use crate::parse::default_constant;
@@ -175,7 +178,7 @@ impl Inliner<'_> {
                     .map(|child| self.inline(child))
                     .collect();
                 let copy = self.program.node(id).with_children(inlined);
-                self.program.push(copy)
+                self.program.push_copy(id, copy)
             }
         }
     }
@@ -196,6 +199,11 @@ impl Inliner<'_> {
         if let Some(&node) = self.program.replacement_nodes.get(&key) {
             return node;
         }
+        let source: Rc<[NodeId]> = applicable
+            .iter()
+            .flat_map(|r| r.references())
+            .chain([id])
+            .collect();
         let mut branches = Vec::with_capacity(applicable.len() + 1);
         for replacement in applicable {
             let definition = replacement.definition;
@@ -219,6 +227,9 @@ impl Inliner<'_> {
             consequence: id,
         });
         let node = self.program.push(Node::Variations(branches));
+        self.program
+            .source_args
+            .insert(node, SourceArgs::Replacement(source));
         self.program.replacement_nodes.insert(key, node);
         node
     }

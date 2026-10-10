@@ -2,6 +2,8 @@
 
 `test/compat` checks that fast-publicodes behaves like `publicodes`: for a given rule set and situation, every rule is evaluated by both engines, and their value, unit and missing variables must match. Errors match when both engines throw.
 
+`test/engine.test.ts` and `test/utils.test.ts` compare the rest of the API the same way, call by call: errors, warnings, options, rule metadata and helpers.
+
 ## Suites
 
 Each `test/compat/suites/<name>.yaml` is a suite: `rules` holds the rules inline, or the name of a package exporting them (`modele-social`); `situations` maps names to situations.

@@ -3,6 +3,11 @@
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
+use std::cell::RefCell;
+
+use crate::error::{Error, Warning, WarningKind};
+use crate::options::Options;
+use crate::raw::Raw;
 use crate::units::UnitRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,8 +91,26 @@ pub struct Rule {
     pub reports_missing: bool,
     /// Whether the rule is the `$SITUATION` of another.
     pub is_situation: bool,
+    /// Whether evaluating the rule makes it the rule warnings name.
+    pub names_evaluation: bool,
+    pub title: String,
+    /// The rule as written, for `getRule`.
+    pub raw: Raw,
+    /// Tagged `experimental`, itself or through an ancestor.
+    pub experimental: bool,
     /// The name of the rule's `$SITUATION` rule.
     pub situation: Option<NameId>,
+}
+
+/// What `publicodes` keeps of the source of an expanded node, visited before its children when
+/// looking for experimental rules.
+#[derive(Debug, Clone)]
+pub enum SourceArgs {
+    /// The arguments of an inline mechanism, as paths of child indices from the node.
+    Inline(Rc<[Box<[u16]>]>),
+    /// The references of each replacement turning a reference into this node, then the
+    /// replaced reference.
+    Replacement(Rc<[NodeId]>),
 }
 
 /// A `remplace` or `rend non applicable` entry; its nodes are references.
@@ -150,6 +173,13 @@ impl Operator {
         ("ou", Operator::Or),
     ];
 
+    pub fn key(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(_, op)| *op == self)
+            .map_or("", |(key, _)| key)
+    }
+
     pub fn from_key(key: &str) -> Option<Self> {
         Self::ALL.iter().find(|(k, _)| *k == key).map(|(_, op)| *op)
     }
@@ -170,7 +200,11 @@ impl Rule {
             declared_type: None,
             reports_missing: false,
             is_situation: true,
+            names_evaluation: false,
             situation: None,
+            title: String::new(),
+            raw: Raw::Null,
+            experimental: false,
         }
     }
 }
@@ -300,6 +334,11 @@ pub enum Node {
         unit: Option<UnitRef>,
         /// Constants, or references named as written.
         options: Vec<NodeId>,
+        /// How each option is written in a situation.
+        values: Vec<String>,
+        /// With `filterNotApplicablePossibilities`, whether each reference option is not
+        /// applicable.
+        not_applicable: Vec<Option<NodeId>>,
     },
 }
 
@@ -457,11 +496,23 @@ impl Node {
                 kind,
                 unit,
                 options,
-            } => Node::UnePossibilite {
-                kind: *kind,
-                unit: unit.clone(),
-                options: options.iter().map(|&o| map(o)).collect::<Result<_, _>>()?,
-            },
+                values,
+                not_applicable,
+            } => {
+                let mut mapped = Vec::with_capacity(options.len());
+                let mut mapped_not_applicable = Vec::with_capacity(options.len());
+                for (option, not_applicable) in options.iter().zip(not_applicable) {
+                    mapped.push(map(*option)?);
+                    mapped_not_applicable.push(not_applicable.map(&mut map).transpose()?);
+                }
+                Node::UnePossibilite {
+                    kind: *kind,
+                    unit: unit.clone(),
+                    options: mapped,
+                    values: values.clone(),
+                    not_applicable: mapped_not_applicable,
+                }
+            }
         })
     }
 
@@ -516,7 +567,16 @@ impl Node {
                     children.extend(tranche.taux);
                 }
             }
-            Node::UnePossibilite { options, .. } => children.extend(options),
+            Node::UnePossibilite {
+                options,
+                not_applicable,
+                ..
+            } => {
+                for (option, not_applicable) in options.iter().zip(not_applicable) {
+                    children.push(*option);
+                    children.extend(not_applicable);
+                }
+            }
         }
         children
     }
@@ -592,12 +652,27 @@ pub struct Program {
     pub next_replacement_id: u32,
     /// Today as `dd/mm/yyyy`, the default bounds of `durée`.
     pub today: String,
+    pub options: Options,
+    /// Warnings not yet reported.
+    pub warnings: RefCell<Vec<Warning>>,
+    /// The base rules in definition order.
+    pub rule_order: Vec<NameId>,
+    pub source_args: FxHashMap<NodeId, SourceArgs>,
 }
 
 impl Program {
     pub fn push(&mut self, node: Node) -> NodeId {
         let id = NodeId(self.nodes.len() as u32);
         self.nodes.push(node);
+        id
+    }
+
+    /// Pushes `node`, a copy of `original`, which keeps its source arguments.
+    pub fn push_copy(&mut self, original: NodeId, node: Node) -> NodeId {
+        let id = self.push(node);
+        if let Some(args) = self.source_args.get(&original).cloned() {
+            self.source_args.insert(id, args);
+        }
         id
     }
 
@@ -614,6 +689,14 @@ impl Program {
             .get(&name)
             .copied()
             .or_else(|| self.base_rules.get(name.0 as usize).copied().flatten())
+    }
+
+    pub fn base_rule(&self, name: NameId) -> Option<&Rule> {
+        let node = self.base_rules.get(name.0 as usize).copied().flatten()?;
+        match self.node(node) {
+            Node::Rule(rule) => Some(rule),
+            _ => None,
+        }
     }
 
     pub fn rule(&self, name: NameId) -> Option<&Rule> {
@@ -635,6 +718,31 @@ impl Program {
         }
     }
 
+    pub fn warn(
+        &self,
+        kind: WarningKind,
+        message: String,
+        rule: Option<String>,
+        cause: Option<Error>,
+    ) {
+        let warn = self.options.warn;
+        let enabled = match kind {
+            WarningKind::ExperimentalRules => warn.experimental_rules,
+            WarningKind::UnitConversion => warn.unit_conversion,
+            WarningKind::CyclicReferences => warn.cyclic_references,
+            WarningKind::DeprecatedSyntax => warn.deprecated_syntax,
+            WarningKind::SituationIssues => warn.situation_issues,
+        };
+        if enabled {
+            self.warnings.borrow_mut().push(Warning {
+                kind,
+                message,
+                rule,
+                cause,
+            });
+        }
+    }
+
     pub fn ty(&self, id: NodeId) -> Option<InferredType> {
         self.types.get(id.0 as usize).copied().flatten()
     }
@@ -650,6 +758,7 @@ impl Program {
         self.types.truncate(len);
         self.replacement_nodes
             .retain(|_, node| (node.0 as usize) < len);
+        self.source_args.retain(|node, _| (node.0 as usize) < len);
     }
 }
 

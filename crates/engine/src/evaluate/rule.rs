@@ -1,11 +1,17 @@
 //! Rules, their disabling by a parent, and `est non applicable`.
 
+use super::js_value::to_js_string;
 use super::{Branch, Evaluated, Evaluator, Missing, Operand, UnitSlot};
-use crate::ast::{Node, NodeId, Operator, Rule, Type, Value};
-use crate::error::Result;
+use crate::ast::{Node, NodeId, Operator, PossibilityKind, Rule, Type, Value};
+use crate::error::{Error, Result, WarningKind};
 
 impl Evaluator<'_> {
     pub(super) fn evaluate_rule(&mut self, rule: &Rule) -> Result<Evaluated> {
+        let program = self.program;
+        let name = program.names.name(rule.name);
+        if rule.names_evaluation {
+            self.state.evaluated_rule = Some(rule.name);
+        }
         let (disabled, parent_missing) = self.disabling_parent(rule)?;
         if disabled {
             return Ok(Evaluated::new(Value::Null, parent_missing));
@@ -17,6 +23,18 @@ impl Evaluator<'_> {
             .filter(|&&n| n == rule.name)
             .count();
         if occurrences > 1 {
+            let parents = &self.state.parent_stack;
+            if parents.is_empty()
+                || parents
+                    .iter()
+                    .any(|&p| !program.names.name(p).starts_with(name))
+            {
+                let message = self.cycle_message(rule);
+                if program.options.strict.no_cycle_runtime {
+                    return Err(Error::evaluation(message).in_rule(name));
+                }
+                self.warn(WarningKind::CyclicReferences, message, None);
+            }
             return Ok(Evaluated::new(Value::Undefined, parent_missing));
         }
         self.state.rule_stack.push(rule.name);
@@ -44,6 +62,16 @@ impl Evaluator<'_> {
                 cached.missing = valeur_missing.clone();
             }
         }
+        if let Some(node) = rule.possibilities
+            && program.options.strict.check_possible_values
+            && !self.is_valid_option(node, &valeur)?
+        {
+            return Err(Error::evaluation(format!(
+                "La valeur \"{}\" de la règle {name} n'est pas une des possibilités attendues",
+                to_js_string(&valeur.value)
+            ))
+            .in_rule(name));
+        }
         let possibilities_unit = possibilities.as_ref().and_then(|p| p.unit.get().cloned());
         let possibilities_missing = possibilities.map(|p| p.missing).unwrap_or_default();
         Ok(Evaluated {
@@ -56,6 +84,73 @@ impl Evaluator<'_> {
                 .merge(&valeur_missing)
                 .merge(&parent_missing),
         })
+    }
+
+    fn cycle_message(&self, rule: &Rule) -> String {
+        let names = &self.program.names;
+        let stack = &self.state.rule_stack;
+        let start = stack.iter().rposition(|&n| n == rule.name).unwrap_or(0);
+        let cycle: Vec<&str> = stack[start..]
+            .iter()
+            .chain([&rule.name])
+            .map(|&n| names.name(n))
+            .collect();
+        let separator = if cycle.len() > 5 { "\n → " } else { " → " };
+        let name = names.name(rule.name);
+        format!(
+            "\nUn cycle a été détecté lors de l'évaluation de cette règle:\n{}\n\nCela vient probablement d'une erreur dans votre modèle.\n\nSi le cycle est voulu, vous pouvez indiquer au moteur de résoudre la référence circulaire en trouvant le point fixe de la fonction. Pour cela, ajoutez l'attribut suivant niveau de la règle :\n\n\t{name}:\n\t\trésoudre la référence circulaire: oui\"\n\t\t...\n",
+            cycle.join(separator)
+        )
+    }
+
+    /// `isAValidOption`: whether `value` is one of the possibilities.
+    pub fn is_valid_option(&mut self, possibilities: NodeId, value: &Evaluated) -> Result<bool> {
+        let program = self.program;
+        if matches!(value.value, Value::Null | Value::Undefined) {
+            return Ok(true);
+        }
+        let Node::UnePossibilite {
+            kind,
+            options,
+            values,
+            not_applicable,
+            ..
+        } = program.node(possibilities)
+        else {
+            return Ok(true);
+        };
+        let written = format!("'{}'", to_js_string(&value.value));
+        match kind {
+            PossibilityKind::Number => {
+                for &option in options {
+                    let Node::Constant(constant) = program.node(option) else {
+                        continue;
+                    };
+                    let matches = match &constant.unit {
+                        Some(unit) => self.convert_node(Some(unit), value)?.value == constant.value,
+                        None => constant.value == value.value,
+                    };
+                    if matches {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            PossibilityKind::String => Ok(values.contains(&written)),
+            PossibilityKind::Reference => {
+                self.evaluate(possibilities)?;
+                for (v, not_applicable) in values.iter().zip(not_applicable) {
+                    let excluded = match not_applicable {
+                        Some(node) => self.evaluate(*node)?.value == Value::Bool(true),
+                        None => false,
+                    };
+                    if *v == written && !excluded {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
     }
 
     /// `evaluateDisablingParent`: whether a parent makes the rule not applicable.

@@ -7,3 +7,8 @@ situations:
   fuzz 1259:
     salarié . convention collective: "'sport'"
     salarié . cotisations . exonérations . JEI: oui
+  fuzz 5110:
+    salarié . convention collective: "'sport'"
+    salarié . rémunération . primes . fin d'année: oui
+    entreprise . imposition . IR . type de bénéfices: "'BA'"
+    dirigeant . rémunération . totale: 32

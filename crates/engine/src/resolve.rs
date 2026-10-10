@@ -172,7 +172,7 @@ impl Resolver<'_> {
                     .map(|child| self.resolve(child))
                     .collect::<Result<Vec<_>>>()?;
                 let copy = self.program.node(id).with_children(resolved);
-                Ok(self.program.push(copy))
+                Ok(self.program.push_copy(id, copy))
             }
         }
     }
@@ -218,9 +218,12 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
     let mut resolved = Vec::with_capacity(rules.len());
     for &(name, draft) in &rules {
         let dotted = resolver.program.names.name(name).to_owned();
-        if let Some(parent) = rule_parents(&dotted)
-            .into_iter()
-            .find(|p| !resolver.scope().is_rule(p))
+        let options = resolver.program.options;
+        let checks_parents = options.strict.no_orphan_rule && options.automatic_namespace_disabling;
+        if checks_parents
+            && let Some(parent) = rule_parents(&dotted)
+                .into_iter()
+                .find(|p| !resolver.scope().is_rule(p))
         {
             return Err(
                 Error::syntax(format!("La règle parente \"{parent}\" n'existe pas"))

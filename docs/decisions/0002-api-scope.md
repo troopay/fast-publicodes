@@ -1,6 +1,6 @@
 # 0002. API scope
 
-Status: accepted
+Status: superseded by 0004
 
 ## Context
 
