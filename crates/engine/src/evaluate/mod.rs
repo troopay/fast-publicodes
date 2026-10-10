@@ -115,6 +115,10 @@ impl EvalState {
         self.inversion_fail
     }
 
+    pub fn forget_inversion_fail(&mut self) {
+        self.inversion_fail = false;
+    }
+
     /// `shallowCopy`: a sub-engine seeing the same rules, with a copy of this cache if
     /// `copy_cache`.
     fn fork(&self, copy_cache: bool) -> EvalState {

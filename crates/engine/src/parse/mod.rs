@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
                         "➡️ Dans le mécanisme unité\nL'unité doit être une chaîne de caractères",
                     )
                 })?;
-                let unit = parse_unit_with(text, &self.program.unit_keys)
+                let unit = parse_unit_with(text, self.program.unit_key.as_ref())
                     .map_err(|e| self.in_mechanism("unité", e))?;
                 Ok(self.push(Node::Unite {
                     unit: Rc::new(unit),
@@ -303,7 +303,7 @@ impl<'a> Parser<'a> {
         let mut bound = |key: &str| match value.get(key) {
             Some(raw) if !matches!(raw, Raw::Null) => self.parse(raw),
             _ => {
-                let today = self.program.today.clone();
+                let today = (self.program.today)()?;
                 Ok(self.push(Node::Constant(default_constant(Value::String(
                     today.into(),
                 )))))
@@ -452,7 +452,7 @@ impl<'a> Parser<'a> {
         };
         let unit = match (ty, value.get("rawUnit").and_then(Raw::as_str)) {
             (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(
-                parse_unit_with(raw_unit, &self.program.unit_keys)
+                parse_unit_with(raw_unit, self.program.unit_key.as_ref())
                     .map_err(|e| self.in_mechanism("constant", e))?,
             )),
             _ => None,

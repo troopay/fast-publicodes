@@ -1,6 +1,6 @@
 # 0005. API surface, with getUnitKey
 
-Status: accepted
+Status: superseded by 0006
 
 ## Context
 

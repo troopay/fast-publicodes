@@ -17,6 +17,7 @@ mod types;
 mod units;
 
 pub use ast::Value;
+pub use date::Today;
 pub use engine::{Engine, Evaluation, SituationError, SituationOptions};
 pub use error::{Error, ErrorKind, Warning, WarningKind};
 pub use evaluate::Missing;

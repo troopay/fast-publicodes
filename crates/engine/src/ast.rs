@@ -5,10 +5,11 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use crate::date::Today;
 use crate::error::{Error, Warning, WarningKind};
 use crate::options::Options;
 use crate::raw::Raw;
-use crate::units::{UnitKeys, UnitRef};
+use crate::units::{UnitKey, UnitRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
@@ -634,7 +635,7 @@ impl Names {
 }
 
 /// Every node, name and rule definition of an engine.
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 pub struct Program {
     pub nodes: Vec<Node>,
     /// Inferred types, set for the nodes type inference visited.
@@ -650,18 +651,37 @@ pub struct Program {
     /// reference it applies to.
     pub replacement_nodes: FxHashMap<Vec<u32>, NodeId>,
     pub next_replacement_id: u32,
-    /// Today as `dd/mm/yyyy`, the default bounds of `durée`.
-    pub today: String,
+    /// The default bounds of `durée`.
+    pub today: Today,
     pub options: Options,
     /// Warnings not yet reported.
     pub warnings: RefCell<Vec<Warning>>,
     /// The base rules in definition order.
     pub rule_order: Vec<NameId>,
     pub source_args: FxHashMap<NodeId, SourceArgs>,
-    pub unit_keys: UnitKeys,
+    pub unit_key: Option<UnitKey>,
 }
 
 impl Program {
+    pub fn new(options: Options, today: Today, unit_key: Option<UnitKey>) -> Self {
+        Program {
+            nodes: Vec::new(),
+            types: Vec::new(),
+            names: Names::default(),
+            base_rules: Vec::new(),
+            overlay: FxHashMap::default(),
+            replacements: FxHashMap::default(),
+            replacement_nodes: FxHashMap::default(),
+            next_replacement_id: 0,
+            today,
+            options,
+            warnings: RefCell::default(),
+            rule_order: Vec::new(),
+            source_args: FxHashMap::default(),
+            unit_key,
+        }
+    }
+
     pub fn push(&mut self, node: Node) -> NodeId {
         let id = NodeId(self.nodes.len() as u32);
         self.nodes.push(node);

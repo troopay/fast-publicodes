@@ -40,21 +40,38 @@ function today(): string {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-/** `getUnitKey` returning the message of the `Error` it throws, as the binding expects. */
-function reportingErrors(getUnitKey: GetUnitKey) {
-  return (unit: string): string | { message: string } => {
+/**
+ * `getUnitKey` as the binding calls it: it returns the message of an `Error` it throws, and
+ * keeps any other value it throws for the engine to throw once the call that ran it returns.
+ */
+class UnitKey {
+  private thrown: { value: unknown } | undefined;
+
+  constructor(private getUnitKey: GetUnitKey) {}
+
+  call = (unit: string): string | { message?: string } => {
     try {
-      return getUnitKey(unit);
+      return this.getUnitKey(unit);
     } catch (error) {
       if (error instanceof Error) return { message: error.message };
-      throw error;
+      this.thrown = { value: error };
+      return {};
     }
   };
+
+  rethrow() {
+    const thrown = this.thrown;
+    if (thrown) {
+      this.thrown = undefined;
+      throw thrown.value;
+    }
+  }
 }
 
 function createNative(
   rules: RawPublicodes,
   options: EngineOptions,
+  unitKey: UnitKey | undefined,
 ): NativeEngine {
   if (typeof rules === "string") {
     throw new PublicodesError(
@@ -63,15 +80,16 @@ function createNative(
       {},
     );
   }
-  const { logger: _, getUnitKey, ...serializable } = options;
+  const { logger: _, getUnitKey: __, ...serializable } = options;
   try {
     return new NativeEngine(
       JSON.stringify(rules),
-      today(),
       JSON.stringify(serializable),
-      getUnitKey && reportingErrors(getUnitKey),
+      today,
+      unitKey?.call,
     );
   } catch (error) {
+    unitKey?.rethrow();
     let details: NativeError | undefined;
     try {
       details = JSON.parse((error as Error).message);
@@ -89,13 +107,17 @@ export class Engine<RuleNames extends string = string> {
   private parsedRules: ParsedRules<RuleNames> | undefined;
   private rules = new Map<string, RuleNode<RuleNames>>();
   private warningTexts: string[] = [];
+  private unitKey: UnitKey | undefined;
+  /** Results by evaluated value, until the cache is reset. */
+  private evaluations = new Map<PublicodesExpression, EvaluatedNode>();
 
   constructor(
     rules: RawPublicodes<RuleNames> = {},
     options: EngineOptions = {},
   ) {
     this.logger = options.logger ?? console;
-    this.native = createNative(rules, options);
+    this.unitKey = options.getUnitKey && new UnitKey(options.getUnitKey);
+    this.native = createNative(rules, options, this.unitKey);
     this.logWarnings(this.native.takeWarnings() as NativeWarnings);
   }
 
@@ -119,6 +141,7 @@ export class Engine<RuleNames extends string = string> {
       strict = false,
     }: { keepPreviousSituation?: boolean; strict?: boolean } = {},
   ): this {
+    this.evaluations = new Map();
     const result = this.native.setSituation(
       JSON.stringify(situation),
       keepPreviousSituation,
@@ -134,6 +157,7 @@ export class Engine<RuleNames extends string = string> {
       if (accepted.length) {
         this.accept(situation, accepted, keepPreviousSituation);
       }
+      this.unitKey?.rethrow();
       throw fromNative(JSON.parse(error) as NativeError);
     }
     this.accept(situation, accepted, keepPreviousSituation);
@@ -158,6 +182,8 @@ export class Engine<RuleNames extends string = string> {
   }
 
   evaluate(value: PublicodesExpression): EvaluatedNode {
+    const evaluated = this.evaluations.get(value);
+    if (evaluated) return evaluated;
     if (typeof value === "object" && value !== null && "nodeKind" in value) {
       throw new PublicodesError(
         "EngineError",
@@ -171,10 +197,11 @@ export class Engine<RuleNames extends string = string> {
         : this.native.evaluate(JSON.stringify(value ?? null), true)
     ) as NativeEvaluation;
     this.logWarnings(result);
+    this.unitKey?.rethrow();
     const { nodeValue, unit, missing } = unwrap(result);
     const native = this.native;
     let missingVariables: Record<string, number> | undefined;
-    return {
+    const evaluation = {
       nodeValue,
       ...(unit && { unit }),
       // Built on first read: most callers only need the value.
@@ -186,6 +213,8 @@ export class Engine<RuleNames extends string = string> {
         return missingVariables;
       },
     };
+    this.evaluations.set(value, evaluation);
+    return evaluation;
   }
 
   getRule(dottedName: RuleNames): RuleNode<RuleNames> {
@@ -228,6 +257,7 @@ export class Engine<RuleNames extends string = string> {
   }
 
   resetCache(): void {
+    this.evaluations = new Map();
     this.native.resetCache();
   }
 
@@ -244,6 +274,8 @@ export class Engine<RuleNames extends string = string> {
     copy.parsedRules = this.parsedRules;
     copy.rules = this.rules;
     copy.warningTexts = [...this.warningTexts];
+    copy.unitKey = this.unitKey;
+    copy.evaluations = copyCache ? new Map(this.evaluations) : new Map();
     return copy;
   }
 }

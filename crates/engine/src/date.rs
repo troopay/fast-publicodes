@@ -1,6 +1,11 @@
 //! `dd/mm/yyyy` dates, validated and converted with JS `Date` normalization.
 
+use std::rc::Rc;
+
 use crate::error::{Error, Result};
+
+/// Today as `dd/mm/yyyy`, asked each time a `durée` is parsed.
+pub type Today = Rc<dyn Fn() -> Result<String>>;
 
 /// Days since 1970-01-01 of a proleptic Gregorian date; `month` is 1-based.
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {

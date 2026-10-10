@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use fast_publicodes_engine::{
-    Engine, Error as EngineError, ErrorKind, Missing, Options, SituationOptions, UnitKey, Value,
-    Warning,
+    Engine, Error as EngineError, ErrorKind, Missing, Options, SituationOptions, Today, UnitKey,
+    Value, Warning,
 };
 use napi::bindgen_prelude::{Either, External, Function, JsObjectValue, Null, Object, Undefined};
 use napi::{Env, Error, Result};
@@ -29,29 +29,51 @@ fn failure<'env>(env: &'env Env, error: &EngineError) -> Result<Object<'env>> {
     Ok(result)
 }
 
-/// What `getUnitKey` returns: a key, or the message of the `Error` it threw.
-type UnitKeyResult = Either<String, ThrownError>;
+/// What `getUnitKey` returns: a key, or what it threw.
+type UnitKeyResult = Either<String, Thrown>;
 
+/// A thrown value: an `Error` and its message, or another value, which the caller keeps.
 #[napi(object)]
-pub struct ThrownError {
-    pub message: String,
+pub struct Thrown {
+    pub message: Option<String>,
 }
 
-/// `getUnitKey` as the engine calls it, from within calls that come from JavaScript.
-fn unit_key(env: &Env, function: Function<String, UnitKeyResult>) -> Result<UnitKey> {
+/// A JavaScript function the engine calls from within calls that come from JavaScript.
+fn callback<Args, Return>(
+    env: &Env,
+    function: Function<Args, Return>,
+) -> Result<impl Fn(Args) -> Result<Return> + 'static>
+where
+    Args: napi::bindgen_prelude::JsValuesTupleIntoVec + 'static,
+    Return: napi::bindgen_prelude::FromNapiValue + 'static,
+{
     let function = function.create_ref()?;
     let raw_env = env.raw();
-    Ok(Rc::new(move |unit: &str| {
+    Ok(move |args| {
         let env = Env::from_raw(raw_env);
-        let message = match function
-            .borrow_back(&env)
-            .and_then(|function| function.call(unit.to_owned()))
-        {
-            Ok(Either::A(key)) => return Ok(key),
-            Ok(Either::B(thrown)) => thrown.message,
-            Err(error) => error.reason,
-        };
-        Err(EngineError::new(ErrorKind::Plain, message))
+        function.borrow_back(&env)?.call(args)
+    })
+}
+
+fn unit_key(env: &Env, function: Function<String, UnitKeyResult>) -> Result<UnitKey> {
+    let call = callback(env, function)?;
+    Ok(Rc::new(move |unit: &str| match call(unit.to_owned()) {
+        Ok(Either::A(key)) => Ok(key),
+        Ok(Either::B(Thrown {
+            message: Some(message),
+        })) => Err(EngineError::new(ErrorKind::Plain, message)),
+        Ok(Either::B(Thrown { message: None })) => Err(EngineError::new(
+            ErrorKind::Thrown,
+            "getUnitKey a levé une valeur",
+        )),
+        Err(error) => Err(EngineError::new(ErrorKind::Internal, error.reason)),
+    }))
+}
+
+fn today(env: &Env, function: Function<(), String>) -> Result<Today> {
+    let call = callback(env, function)?;
+    Ok(Rc::new(move || {
+        call(()).map_err(|error| EngineError::new(ErrorKind::Internal, error.reason))
     }))
 }
 
@@ -71,21 +93,22 @@ pub struct NativeEngine {
 
 #[napi]
 impl NativeEngine {
-    /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`. Fails with the error as
+    /// `get_today` gives the date `durée` defaults to, as `dd/mm/yyyy`. Fails with the error as
     /// JSON `{ name, message, dottedName }`.
     #[napi(constructor)]
     pub fn new(
         env: &Env,
         rules: String,
-        today: String,
         options: String,
+        get_today: Function<(), String>,
         get_unit_key: Option<Function<String, UnitKeyResult>>,
     ) -> Result<Self> {
         let options = Options::from_json(&parse_json(&options)?);
         let unit_key = get_unit_key
             .map(|function| unit_key(env, function))
             .transpose()?;
-        let engine = Engine::new(&parse_json(&rules)?, &today, options, unit_key)
+        let today = today(env, get_today)?;
+        let engine = Engine::new(&parse_json(&rules)?, options, today, unit_key)
             .map_err(|error| Error::from_reason(error_json(&error).to_string()))?;
         Ok(Self {
             engine,

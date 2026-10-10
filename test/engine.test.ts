@@ -1,6 +1,6 @@
 import rules from "modele-social";
 import PublicodesEngine from "publicodes";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import Engine, {
   type EngineOptions,
   type RawPublicodes,
@@ -120,6 +120,28 @@ describe("situation", () => {
 });
 
 describe("evaluate", () => {
+  test("durée ends by default on the day it is parsed", () => {
+    const parsedOn = new Date(2026, 0, 1, 12);
+    vi.useFakeTimers({ toFake: ["Date"], now: parsedOn });
+    try {
+      compare(
+        { ancienneté: { durée: { depuis: "01/01/2020" } } },
+        {},
+        (engine) => {
+          vi.setSystemTime(new Date(2026, 0, 3, 12));
+          const values = [
+            value(engine, "ancienneté"),
+            value(engine, { durée: { depuis: "01/01/2020" } } as never),
+          ];
+          vi.setSystemTime(parsedOn);
+          return values;
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("numbers and objects", () => {
     compare(contrat, {}, (engine) => [
       value(engine, 3 as never),
@@ -168,6 +190,7 @@ describe("options", () => {
     };
     const failing = (unit: string) => {
       if (unit === "x") throw new Error("Unité refusée");
+      if (unit === "y") throw { name: "Refus", message: "Unité y refusée" };
       return unit;
     };
 
@@ -184,15 +207,39 @@ describe("options", () => {
       );
     });
 
-    test("errors it throws", () => {
-      compare({ a: "1 x" }, { getUnitKey: failing }, () => null);
+    test("is called for each unit written", () => {
+      const calls: string[] = [];
+      const getUnitKey = (unit: string) => {
+        calls.push(unit);
+        return keys[unit] ?? unit;
+      };
+      compare(translated, { getUnitKey }, (engine) => {
+        engine.setSituation({ prime: "1200 €/year" });
+        engine.evaluate("annuel / 12 month/year");
+        return calls.splice(0);
+      });
+    });
+
+    test.each(["x", "y"])("what it throws for %s", (unit) => {
+      compare({ a: `1 ${unit}` }, { getUnitKey: failing }, () => null);
       compare(contrat, { getUnitKey: failing }, (engine) =>
-        value(engine, "salaire + 2 x"),
+        value(engine, `salaire + 2 ${unit}`),
       );
-      for (const strict of [true, false]) {
-        compare(contrat, { getUnitKey: failing }, (engine) =>
-          engine.setSituation({ salaire: "2 x" }, { strict }).getSituation(),
-        );
+      for (const keepPreviousSituation of [true, false]) {
+        for (const strict of [true, false]) {
+          compare(contrat, { getUnitKey: failing }, (engine) => {
+            engine.setSituation({ salaire: 2500 });
+            try {
+              engine.setSituation(
+                { contrat: "'CDD'", salaire: `2 ${unit}` },
+                { strict, keepPreviousSituation },
+              );
+            } catch (error) {
+              return [(error as Error).message, engine.getSituation()];
+            }
+            return engine.getSituation();
+          });
+        }
       }
     });
   });
@@ -314,6 +361,44 @@ describe("copies and caches", () => {
       copy.setSituation({ salaire: 1000 });
       engine.resetCache();
       return [value(engine, "net"), value(copy, "net"), engine.inversionFail()];
+    });
+  });
+
+  test("copies forget inversion failures", () => {
+    const ruleSet = {
+      brut: { unité: "€", "inversion numérique": { avec: ["net"] } },
+      net: { valeur: "brut * 0", unité: "€" },
+    };
+    compare(ruleSet, {}, (engine) => {
+      engine.setSituation({ net: 100 });
+      engine.evaluate("brut");
+      return [engine.inversionFail(), engine.shallowCopy().inversionFail()];
+    });
+  });
+
+  test("evaluations stay the same objects until the cache is reset", () => {
+    const sameTwice = (engine: AnyEngine, expression: object) => {
+      const first = engine.evaluate(expression as never);
+      return engine.evaluate(expression as never) === first;
+    };
+    compare(contrat, {}, (engine) => {
+      const expression = { valeur: "net" };
+      const first = engine.evaluate("net");
+      const same = [
+        engine.evaluate("net") === first,
+        sameTwice(engine, expression),
+        sameTwice(engine, { valeur: "net" }),
+        engine.shallowCopy().evaluate("net") === first,
+        engine.shallowCopy({ copyCache: false }).evaluate("net") === first,
+      ];
+      engine.resetCache();
+      const afterReset = engine.evaluate("net");
+      engine.setSituation({});
+      return [
+        ...same,
+        afterReset === first,
+        engine.evaluate("net") === afterReset,
+      ];
     });
   });
 });

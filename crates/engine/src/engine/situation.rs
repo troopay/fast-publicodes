@@ -63,19 +63,24 @@ impl Engine {
         }
         if strict {
             if let Err(error) = self.load_situation_entries(&accepted) {
+                if error.kind == ErrorKind::Thrown {
+                    return Err(fail(error, true));
+                }
                 self.restore_situation(previous);
                 return Err(fail(situation_error(error), true));
             }
         } else {
-            accepted.retain(|entry| {
-                match self.load_situation_entries(std::slice::from_ref(entry)) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        self.warn_situation(situation_error(error));
-                        false
+            let mut loaded = Vec::with_capacity(accepted.len());
+            for entry in accepted {
+                match self.load_situation_entries(std::slice::from_ref(&entry)) {
+                    Ok(()) => loaded.push(entry),
+                    Err(error) if error.kind == ErrorKind::Thrown => {
+                        return Err(fail(error, true));
                     }
+                    Err(error) => self.warn_situation(situation_error(error)),
                 }
-            });
+            }
+            accepted = loaded;
         }
 
         let mut valid = Vec::with_capacity(accepted.len());

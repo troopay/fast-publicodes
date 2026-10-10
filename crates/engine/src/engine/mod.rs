@@ -9,6 +9,7 @@ use serde_json::Value as Json;
 pub use situation::{SituationError, SituationOptions};
 
 use crate::ast::{NameId, Node, NodeId, Program, Replacement, SourceArgs, Value};
+use crate::date::Today;
 use crate::error::{Error, ErrorKind, Result, Warning, WarningKind};
 use crate::evaluate::{EvalState, Evaluated, Evaluator, Missing};
 use crate::expression::is_reference;
@@ -17,7 +18,7 @@ use crate::parse::{Parser, Templates};
 use crate::raw::Raw;
 use crate::replace::applicable_replacements;
 use crate::resolve::{disambiguate, finalize};
-use crate::units::{Unit, UnitKey, UnitKeys};
+use crate::units::{Unit, UnitKey};
 
 /// The result of `evaluate`; `Engine::missing_variables` names its missing variables.
 #[derive(Debug, Clone)]
@@ -52,11 +53,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// `today` is the date `durée` defaults to, as `dd/mm/yyyy`.
     pub fn new(
         rules: &Json,
-        today: &str,
         options: Options,
+        today: Today,
         unit_key: Option<UnitKey>,
     ) -> Result<Self> {
         if !rules.is_object() {
@@ -65,10 +65,7 @@ impl Engine {
                 "Publicodes does not parse yaml rule sets itself anymore. Please provide a parsed js object. E.g. the `eemeli/yaml` package.",
             ));
         }
-        let mut program = Program::default();
-        program.options = options;
-        program.today = today.to_owned();
-        program.unit_keys = UnitKeys::new(unit_key);
+        let mut program = Program::new(options, today, unit_key);
         let templates = Templates::new(&mut program)?;
         let mut parser = Parser::new(&mut program, &templates, "");
         parser.parse_rules(&Raw::from(rules))?;
@@ -94,10 +91,11 @@ impl Engine {
     }
 
     /// `shallowCopy`: an engine with the same rules and situation, and this cache if
-    /// `copy_cache`.
+    /// `copy_cache`, but no inversion failure.
     pub fn shallow_copy(&self, copy_cache: bool) -> Engine {
         let mut copy = self.clone();
         copy.program.warnings.borrow_mut().clear();
+        copy.state.forget_inversion_fail();
         if !copy_cache {
             copy.reset_cache();
         }
