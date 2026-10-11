@@ -305,6 +305,18 @@ describe("evaluate", () => {
     }
   });
 
+  test("AST nodes are refused, not evaluated as objects", () => {
+    const node = new PublicodesEngine({ a: 1 }).getRule("a");
+    const engine = new Engine({ a: 1 });
+    for (const use of [
+      () => engine.evaluate(node as never),
+      () => engine.evaluate({ valeur: node } as never),
+      () => engine.setSituation({ a: node } as never),
+    ]) {
+      expect(use).toThrow("fast-publicodes n'évalue pas les nœuds d'AST");
+    }
+  });
+
   test("numbers and objects", () => {
     compare(contrat, {}, (engine) => [
       value(engine, 3 as never),

@@ -16,7 +16,6 @@ export interface NativeEngine {
     strict: boolean,
   ): object;
   evaluate(text: string, json: boolean): object;
-  evaluateSuggestion(rule: string, name: string): object;
   evaluations(): unknown;
   missingVariables(evaluations: unknown, index: number): object;
   takeWarnings(): object;
@@ -43,13 +42,21 @@ export function binding(): Binding {
 
 /**
  * `value` as JSON for the binding, writing what JSON cannot as `{ "\u0000": String(it) }`:
- * non-finite numbers, and `undefined` as `value` or as one of its properties.
+ * non-finite numbers, and `undefined` as `value` or as one of its properties. `encode` may
+ * replace any object of `value`.
  */
-export function toJson(value: unknown): string {
+export function toJson(
+  value: unknown,
+  encode?: (item: object) => object | undefined,
+): string {
   if (value === undefined) return UNDEFINED;
   return JSON.stringify(value, function (this: unknown, _key, item) {
     if (typeof item === "number" && !Number.isFinite(item)) {
       return { "\u0000": String(item) };
+    }
+    if (encode && typeof item === "object" && item !== null) {
+      const encoded = encode(item);
+      if (encoded) return encoded;
     }
     return item === undefined && this === value
       ? { "\u0000": "undefined" }

@@ -116,6 +116,23 @@ function createNative(
 /** The rule and name of each suggestion `getRule()` returns, which any engine evaluates. */
 const suggestionSources = new WeakMap<object, { rule: string; name: string }>();
 
+/**
+ * A suggestion as the engine reads it in an expression; any other AST node is refused, as
+ * fast-publicodes has no AST.
+ */
+function encodeNode(item: object): object | undefined {
+  const source = suggestionSources.get(item);
+  if (source) return { "\u0000": source };
+  if ("nodeKind" in item) {
+    throw new PublicodesError(
+      "EngineError",
+      "fast-publicodes n'évalue pas les nœuds d'AST",
+      {},
+    );
+  }
+  return undefined;
+}
+
 export class Engine<RuleNames extends string = string> {
   private native: NativeEngine;
   private logger: Logger;
@@ -167,7 +184,7 @@ export class Engine<RuleNames extends string = string> {
   ): this {
     this.resetEvaluations();
     const result = this.native.setSituation(
-      toJson(situation),
+      toJson(situation, encodeNode),
       Boolean(keepPreviousSituation),
       Boolean(strict),
     ) as { accepted: RuleNames[] } & NativeWarnings &
@@ -208,14 +225,9 @@ export class Engine<RuleNames extends string = string> {
   evaluate(value: PublicodesExpression): EvaluatedNode {
     const evaluated = this.evaluations.get(value);
     if (evaluated) return evaluated;
-    if (typeof value === "object" && value !== null && "nodeKind" in value) {
-      throw new PublicodesError(
-        "EngineError",
-        "fast-publicodes n'évalue pas les nœuds d'AST",
-        {},
-      );
-    }
-    const result = this.evaluateNative(value);
+    const json = typeof value !== "string";
+    const text = json ? toJson(value, encodeNode) : value;
+    const result = this.native.evaluate(text, json) as NativeEvaluation;
     this.logWarnings(result);
     this.unitKey?.rethrow();
     const { nodeValue, index, ...nativeUnit } = unwrap(result);
@@ -238,20 +250,6 @@ export class Engine<RuleNames extends string = string> {
     };
     this.evaluations.set(value, evaluation);
     return evaluation;
-  }
-
-  private evaluateNative(value: PublicodesExpression): NativeEvaluation {
-    const suggestion =
-      typeof value === "object" ? suggestionSources.get(value) : undefined;
-    if (suggestion) {
-      return this.native.evaluateSuggestion(
-        suggestion.rule,
-        suggestion.name,
-      ) as NativeEvaluation;
-    }
-    const json = typeof value !== "string";
-    const text = json ? toJson(value) : value;
-    return this.native.evaluate(text, json) as NativeEvaluation;
   }
 
   getRule(dottedName: RuleNames): RuleNode<RuleNames> {

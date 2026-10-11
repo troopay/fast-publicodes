@@ -180,37 +180,77 @@ impl Engine {
         std::mem::take(&mut *self.program.warnings.borrow_mut())
     }
 
-    /// Evaluates a publicodes expression: a string, a number, or an object written as a rule.
-    /// Strings evaluated since the cache was reset are not evaluated again.
+    /// Evaluates a publicodes expression: a string, a number, or an object written as a rule,
+    /// which may hold suggestions. Strings evaluated since the cache was reset are not evaluated
+    /// again.
     pub fn evaluate(&mut self, value: &Json) -> Result<Evaluation> {
-        self.evaluation(&Raw::from(value))
-    }
-
-    /// `evaluate(getRule(rule).suggestions[name])`.
-    pub fn evaluate_suggestion(&mut self, rule: &str, name: &str) -> Result<Evaluation> {
-        let suggestion = self
-            .public_rule(rule)?
-            .1
-            .suggestions
-            .iter()
-            .find(|(n, _)| &**n == name)
-            .map(|&(_, node)| node)
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Internal,
-                    format!("La règle {rule} n'a pas de suggestion {name}"),
-                )
-            })?;
-        self.evaluation(&Raw::map([("valeur", Raw::Node(suggestion))]))
-    }
-
-    fn evaluation(&mut self, value: &Raw) -> Result<Evaluation> {
-        let (evaluated, index) = self.evaluated(value)?;
+        let value = self.with_suggestions(&Raw::from(value))?;
+        let (evaluated, index) = self.evaluated(&value)?;
         Ok(Evaluation {
             value: evaluated.value,
             unit: evaluated.unit.get().cloned(),
             index,
         })
+    }
+
+    /// `value` with each suggestion, written `{ "\u{0}": { rule, name } }`, replaced by its node;
+    /// a suggestion alone becomes `{ valeur: node }`, as `publicodes` wraps a node.
+    fn with_suggestions(&self, value: &Raw) -> Result<Raw> {
+        Ok(match self.suggestion(value)? {
+            Some(node) => Raw::map([("valeur", Raw::Node(node))]),
+            None => self.nested_suggestions(value)?,
+        })
+    }
+
+    fn nested_suggestions(&self, value: &Raw) -> Result<Raw> {
+        if let Some(node) = self.suggestion(value)? {
+            return Ok(Raw::Node(node));
+        }
+        Ok(match value {
+            Raw::List(items) => Raw::list(
+                items
+                    .iter()
+                    .map(|item| self.nested_suggestions(item))
+                    .collect::<Result<_>>()?,
+            ),
+            Raw::Map(entries) => Raw::map(
+                entries
+                    .iter()
+                    .map(|(key, item)| Ok((key.clone(), self.nested_suggestions(item)?)))
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            other => other.clone(),
+        })
+    }
+
+    fn suggestion(&self, value: &Raw) -> Result<Option<NodeId>> {
+        let Raw::Map(entries) = value else {
+            return Ok(None);
+        };
+        let [(key, reference)] = entries.as_slice() else {
+            return Ok(None);
+        };
+        let (Some(rule), Some(name)) = (
+            reference.get("rule").and_then(Raw::as_str),
+            reference.get("name").and_then(Raw::as_str),
+        ) else {
+            return Ok(None);
+        };
+        if &**key != "\u{0}" {
+            return Ok(None);
+        }
+        self.public_rule(rule)?
+            .1
+            .suggestions
+            .iter()
+            .find(|(n, _)| &**n == name)
+            .map(|&(_, node)| Some(node))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Internal,
+                    format!("La règle {rule} n'a pas de suggestion {name}"),
+                )
+            })
     }
 
     fn evaluated(&mut self, value: &Raw) -> Result<(Evaluated, u32)> {

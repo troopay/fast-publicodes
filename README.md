@@ -41,7 +41,7 @@ On the [modele-social](https://www.npmjs.com/package/modele-social) rules (`pnpm
 
 ## Limitations
 
-- **No AST.** `evaluate()` returns `nodeValue`, `unit` and `missingVariables` without `explanation`, and rules returned by `getRule()` and `getParsedRules()` carry their metadata without their node tree; their `suggestions` are opaque values that only `evaluate()` reads. `parsePublicodes`, `reduceAST`, `transformAST`, `traverseASTNode`, `utils.cyclicDependencies`, `utils.disambiguateReferenceNode` and `utils.updateReferencesMapsFromReferenceNode` are not provided, and `evaluate()` accepts no AST node other than these suggestions.
+- **No AST.** `evaluate()` returns `nodeValue`, `unit` and `missingVariables` without `explanation`, and rules returned by `getRule()` and `getParsedRules()` carry their metadata without their node tree; their `suggestions` are opaque values that `evaluate()` and `setSituation()` read anywhere in an expression. `parsePublicodes`, `reduceAST`, `transformAST`, `traverseASTNode`, `utils.cyclicDependencies`, `utils.disambiguateReferenceNode` and `utils.updateReferencesMapsFromReferenceNode` are not provided, and `evaluate()` and `setSituation()` refuse any other AST node with an error.
 - **Internal fields.** Of the members `publicodes` marks as internal, only `context.nodesTypes` exists, with the type inferred for each rule `getRule()` returns; `baseContext`, `publicParsedRules`, `cache`, `evaluateNode` and the rest of `context` do not.
 - **`undefined` inside rules.** A property of a rule set to `undefined` counts as absent, where `publicodes` reads some of them as an empty value.
 

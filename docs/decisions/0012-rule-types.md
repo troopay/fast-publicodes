@@ -1,6 +1,6 @@
 # 0012. Rule types and suggestions
 
-Status: accepted
+Status: superseded by 0013
 
 ## Context
 

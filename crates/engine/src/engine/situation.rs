@@ -35,7 +35,15 @@ impl Engine {
         self.reset_cache();
         let strict = options.strict || self.program.options.strict.situation;
         let entries: Vec<(String, Raw)> = match situation {
-            Json::Object(map) => map.iter().map(|(k, v)| (k.clone(), Raw::from(v))).collect(),
+            Json::Object(map) => map
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), self.with_suggestions(&Raw::from(v))?)))
+                .collect::<Result<_>>()
+                .map_err(|error| SituationError {
+                    error,
+                    situation_reset: false,
+                    accepted: Vec::new(),
+                })?,
             _ => Vec::new(),
         };
         let previous = self.situation.clone();
