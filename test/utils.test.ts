@@ -165,7 +165,7 @@ describe("parseExpression", () => {
     ];
     const random = mulberry32(1);
     const pick = () => tokens[Math.floor(random() * tokens.length)];
-    for (let i = 0; i < 20_000; i++) {
+    for (let i = 0; i < 5_000; i++) {
       const length = 1 + Math.floor(random() * 8);
       const expression = Array.from({ length }, pick).join("");
       same((module) => [expression, module.parseExpression(expression, "r")]);

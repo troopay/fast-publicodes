@@ -10,7 +10,7 @@
 
 ## Suites
 
-Each `test/compat/suites/<name>.yaml` is a suite: `rules` holds the rules inline, or the name of a package exporting them (`modele-social`); `situations` maps names to situations.
+Each `test/compat/suites/<name>.yaml` is a suite: `rules` holds the rules inline, or the module exporting them, such as `modele-social` or a JSON file in a package; `situations` maps names to situations.
 
 ```yaml
 rules:

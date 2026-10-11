@@ -1,0 +1,3 @@
+rules: "@incubateur-ademe/nosgestesclimat/public/co2-model.FR-lang.fr.json"
+situations:
+  vide: {}

@@ -8,12 +8,18 @@ importers:
 
   .:
     devDependencies:
+      '@betagouv/aides-velo':
+        specifier: 4.0.0
+        version: 4.0.0
       '@biomejs/biome':
         specifier: 2.5.15
         version: 2.5.15
+      '@incubateur-ademe/nosgestesclimat':
+        specifier: 4.17.2
+        version: 4.17.2(publicodes@1.10.4)
       '@napi-rs/cli':
         specifier: 3.10.8
-        version: 3.10.8(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@22.20.5)
+        version: 3.10.8(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.20.5)
       '@types/node':
         specifier: 22.20.5
         version: 22.20.5
@@ -34,6 +40,10 @@ importers:
         version: 2.9.1
 
 packages:
+
+  '@betagouv/aides-velo@4.0.0':
+    resolution: {integrity: sha512-vzb2Hvj2O9vTPqhpAgHZUXt26oDMsvJfbaqWGN/+1UA/CYCuC3DXufByhZReprBhZ1m9DutcezDfGmjex6809w==}
+    deprecated: The up-to-date package is now https://www.npmjs.com/package/aides-velo
 
   '@biomejs/biome@2.5.15':
     resolution: {integrity: sha512-WZTW4slm/pdkh92K6t/3aEN++44JD1PQ7squ7RCMLI1flHGl43DVOIGXvCjHiZgBMO1V4uYxoFNtqrIA4qGuIQ==}
@@ -109,6 +119,16 @@ packages:
 
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
+
+  '@etalab/decoupage-administratif@6.0.0':
+    resolution: {integrity: sha512-XavYsFlbcM/prKr8hNHPKER94IHw/dsxNM4nxjWMYk6PLFACpEedvn/7wK8Baozm0dCYhWWcf+7bcWpA5pmCaQ==}
+    engines: {node: '>= 10'}
+
+  '@incubateur-ademe/nosgestesclimat@4.17.2':
+    resolution: {integrity: sha512-lUaZuLP+eX/QETm3w2Ub80rl8HVNvEu2/amV0pyxP+MZTxjE7XNZAFgCl0G2Z7++HDk14RlCfV9XHpQOBU39MQ==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      publicodes: ^1.8.5
 
   '@inquirer/ansi@2.0.9':
     resolution: {integrity: sha512-0Ywt3S8tqM6TWUcsRlBFQ1x+X3/o8kktX0ZiKAnByYb9GFDknnOhse1PVtfiD2BXPI8ar+BWx9PV9R0lQIcygw==}
@@ -930,8 +950,16 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
+  balanced-match@4.0.4:
+    resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
+    engines: {node: 18 || 20 || >=22}
+
   before-after-hook@4.0.0:
     resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
+
+  brace-expansion@5.0.12:
+    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+    engines: {node: 20 || >=22}
 
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
@@ -1004,6 +1032,10 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  glob@13.0.6:
+    resolution: {integrity: sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw==}
+    engines: {node: 18 || 20 || >=22}
 
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
@@ -1090,8 +1122,20 @@ packages:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
 
+  lru-cache@11.5.3:
+    resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
+    engines: {node: 20 || >=22}
+
   magic-string@1.4.3:
     resolution: {integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ==}
+
+  minimatch@10.2.6:
+    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
+    engines: {node: 18 || 20 || >=22}
+
+  minipass@7.1.3:
+    resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
+    engines: {node: '>=16 || 14 >=14.17'}
 
   modele-social@11.1.0:
     resolution: {integrity: sha512-O4I8F74iHrw3mTHHrpbFaCEA0T/5yZtGTnGLPj31xgdMSBkFrnM+I+q+DIMt4c/ZTpk/08t3MK5XneM9QmCNew==}
@@ -1117,6 +1161,10 @@ packages:
   obug@3.0.0:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
+
+  path-scurry@2.0.2:
+    resolution: {integrity: sha512-3O/iVVsJAPsOnpwWIeD+d6z/7PmqApyQePUtCndjatj/9I5LylHvt5qluFaBT3I5h3r1ejfR056c+FCv+NnNXg==}
+    engines: {node: 18 || 20 || >=22}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -1286,6 +1334,11 @@ packages:
 
 snapshots:
 
+  '@betagouv/aides-velo@4.0.0':
+    dependencies:
+      '@etalab/decoupage-administratif': 6.0.0
+      glob: 13.0.6
+
   '@biomejs/biome@2.5.15':
     optionalDependencies:
       '@biomejs/cli-darwin-arm64': 2.5.15
@@ -1352,6 +1405,12 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@etalab/decoupage-administratif@6.0.0': {}
+
+  '@incubateur-ademe/nosgestesclimat@4.17.2(publicodes@1.10.4)':
+    dependencies:
+      publicodes: 1.10.4
 
   '@inquirer/ansi@2.0.9': {}
 
@@ -1481,7 +1540,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@napi-rs/cli@3.10.8(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@22.20.5)':
+  '@napi-rs/cli@3.10.8(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.20.5)':
     dependencies:
       '@inquirer/prompts': 8.7.3(@types/node@22.20.5)
       '@napi-rs/cross-toolchain': 1.0.3
@@ -1496,8 +1555,8 @@ snapshots:
       typanion: 3.14.0
       typescript: 6.0.3
     optionalDependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
+      '@emnapi/core': 1.9.2
+      '@emnapi/runtime': 1.9.2
     transitivePeerDependencies:
       - '@napi-rs/cross-toolchain-arm64-target-aarch64'
       - '@napi-rs/cross-toolchain-arm64-target-armv7'
@@ -1950,7 +2009,13 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
+  balanced-match@4.0.4: {}
+
   before-after-hook@4.0.0: {}
+
+  brace-expansion@5.0.12:
+    dependencies:
+      balanced-match: 4.0.4
 
   chai@6.3.0: {}
 
@@ -1998,6 +2063,12 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  glob@13.0.6:
+    dependencies:
+      minimatch: 10.2.6
+      minipass: 7.1.3
+      path-scurry: 2.0.2
 
   iconv-lite@0.7.3:
     dependencies:
@@ -2058,9 +2129,17 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
 
+  lru-cache@11.5.3: {}
+
   magic-string@1.4.3:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  minimatch@10.2.6:
+    dependencies:
+      brace-expansion: 5.0.12
+
+  minipass@7.1.3: {}
 
   modele-social@11.1.0(publicodes@1.10.4):
     dependencies:
@@ -2075,6 +2154,11 @@ snapshots:
   obug@2.2.1: {}
 
   obug@3.0.0: {}
+
+  path-scurry@2.0.2:
+    dependencies:
+      lru-cache: 11.5.3
+      minipass: 7.1.3
 
   picocolors@1.1.1: {}
 

@@ -1,0 +1,3 @@
+rules: "@betagouv/aides-velo/rules"
+situations:
+  vide: {}

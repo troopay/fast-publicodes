@@ -37,7 +37,9 @@
     "bench": "pnpm build:native --release && vitest bench --run --reporter=default"
   },
   "devDependencies": {
+    "@betagouv/aides-velo": "4.0.0",
     "@biomejs/biome": "2.5.15",
+    "@incubateur-ademe/nosgestesclimat": "4.17.2",
     "@napi-rs/cli": "3.10.8",
     "@types/node": "22.20.5",
     "modele-social": "11.1.0",

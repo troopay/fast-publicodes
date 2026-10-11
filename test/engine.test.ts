@@ -1,9 +1,13 @@
-import rules from "modele-social";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import veloRules from "@betagouv/aides-velo/rules";
+import socialRules from "modele-social";
 import PublicodesEngine from "publicodes";
 import { describe, expect, test, vi } from "vitest";
 import Engine, {
   type EngineOptions,
   type RawPublicodes,
+  type Situation,
 } from "../src/index.js";
 
 type AnyEngine = Engine | PublicodesEngine;
@@ -309,36 +313,41 @@ describe("warnings", () => {
   });
 });
 
-describe("rules", () => {
-  const parsed = (engine: AnyEngine) =>
-    Object.entries(engine.getParsedRules()).map(([name, rule]) => [
-      name,
-      rule.title,
-      rule.private,
-      rule.rawNode,
-    ]);
+const models: [string, RawPublicodes, Situation][] = [
+  [
+    "modele-social",
+    socialRules as RawPublicodes,
+    { "salarié . contrat": "'CDI'", "salarié . contrat . salaire brut": 3000 },
+  ],
+  [
+    "nosgestesclimat",
+    JSON.parse(
+      readFileSync(
+        createRequire(import.meta.url).resolve(
+          "@incubateur-ademe/nosgestesclimat/public/co2-model.FR-lang.fr.json",
+        ),
+        "utf8",
+      ),
+    ),
+    { "alimentation . plats . végétalien . nombre": 3 },
+  ],
+  [
+    "aides-velo",
+    veloRules as RawPublicodes,
+    { "localisation . code insee": "'75056'", "demandeur . âge": 22 },
+  ],
+];
 
-  test("modele-social rules", () => {
-    compare(rules as RawPublicodes, {}, parsed);
-  });
-
-  test("modele-social warnings", () => {
-    compare(rules as RawPublicodes, {}, (engine) => {
-      engine.setSituation({
-        "salarié . contrat": "'CDI'",
-        "salarié . contrat . salaire brut": 3000,
+test.each(models)(
+  "%s: rules, possibilities and warnings",
+  (_, ruleSet, situation) => {
+    compare(ruleSet, {}, (engine) => {
+      const names = Object.keys(engine.getParsedRules());
+      const rules = names.map((name) => {
+        const rule = engine.getRule(name);
+        return [name, rule.title, rule.private, rule.rawNode];
       });
-      for (const name of Object.keys(engine.getParsedRules())) {
-        try {
-          engine.evaluate(name);
-        } catch {}
-      }
-    });
-  });
-
-  test("modele-social possibilities", () => {
-    compare(rules as RawPublicodes, {}, (engine) =>
-      Object.keys(engine.getParsedRules()).map((name) =>
+      const possibilities = names.map((name) =>
         engine
           .getPossibilitiesFor(name)
           ?.map(({ type, nodeValue, publicodesValue, dottedName, title }) => ({
@@ -348,10 +357,17 @@ describe("rules", () => {
             dottedName,
             title,
           })),
-      ),
-    );
-  });
-});
+      );
+      engine.setSituation(situation);
+      for (const name of names) {
+        try {
+          engine.evaluate(name);
+        } catch {}
+      }
+      return [rules, possibilities];
+    });
+  },
+);
 
 describe("copies and caches", () => {
   test("shallowCopy and resetCache", () => {
