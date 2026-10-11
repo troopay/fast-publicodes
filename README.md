@@ -1,6 +1,6 @@
 # fast-publicodes
 
-A port of [publicodes](https://github.com/publicodes/publicodes) 1.x with its engine rewritten in Rust: the same API and the same behaviour, faster. Node loads it as a native addon; browsers and other runtimes load it as WebAssembly, from the same package.
+A port of [publicodes](https://github.com/publicodes/publicodes) 1.x with its engine rewritten in Rust: the same API and the same behaviour, faster. Node loads it as a native addon, prebuilt for Linux, macOS and Windows; browsers, other runtimes and other platforms load it as WebAssembly, from the same package.
 
 > **Not affiliated with the publicodes project.** fast-publicodes is an independent port. The language, its features and every discussion about them belong to [publicodes](https://github.com/publicodes/publicodes): propose features and report language issues there, not here. If publicodes is useful to you, support its authors: star the repository, contribute, and credit them.
 
@@ -15,7 +15,11 @@ Stay with publicodes when its speed is enough for you, or when you need what fas
 
 ## Usage
 
-Replace the import; nothing else changes.
+```bash
+npm install fast-publicodes
+```
+
+Then replace the import; nothing else changes.
 
 ```ts
 import Engine from "fast-publicodes";
@@ -71,6 +75,8 @@ pnpm build:native
 | `FUZZ_SEED=100 pnpm test test/compat/fuzz.test.ts` | Fuzz new seeds; see [docs/testing.md](docs/testing.md) |
 | `cargo test` | Rust tests |
 | `pnpm bench` | Benchmarks against publicodes |
+
+To publish a version, see [docs/releasing.md](docs/releasing.md).
 
 ## License
 

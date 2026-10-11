@@ -9,7 +9,7 @@ fast-publicodes is an npm package with the same API and behaviour as `publicodes
 - `crates/engine`: the publicodes engine in pure Rust, unaware of JavaScript. `engine/` (rules, situation, evaluation entry points) drives rules through `parse` (raw rules to nodes, inline mechanisms expanded), `resolve` (references), `replace` (`remplace` and `rend non applicable`), `types` (inference), `sub_engines` (rules for `contexte` and inversions) and `evaluate`; it mirrors the `publicodes` source file by file.
 - `crates/node`: napi-rs binding exposing the engine to Node; built into `native/` (addon plus generated JS loader and types).
 - `crates/wasm`: wasm-bindgen binding with the same interface, built into `wasm/`; `crates/js` holds what both bindings share.
-- `src/`: the TypeScript package, wrapping a binding behind the `publicodes` API and types; compiled to `dist/`. `index.ts` (Node) and `web.ts` (everything else) set the binding, then export `api.ts`.
+- `src/`: the TypeScript package, wrapping a binding behind the `publicodes` API and types; compiled to `dist/`. `index.ts` (Node: the addon, or WebAssembly where no addon is installed) and `web.ts` (everything else) set the binding, then export `api.ts`.
 
 Rules and evaluation state live in Rust; calls cross the binding in bulk.
 
@@ -25,6 +25,7 @@ Only what an agent needs to place a change correctly. The why is in ADRs.
 | `test/compat/` | Comparison against `publicodes`; suites (rules and situations) in `suites/` |
 | `bench/` | Benchmarks against `publicodes` |
 | `docs/` | Documentation and ADRs |
+| `.github/` | CI and release workflows |
 
 One row per top-level directory; deeper only where the tree alone would not tell an agent where a change belongs.
 
@@ -99,6 +100,7 @@ Every document except ADRs is listed here. Read one only when the task needs it.
 | Document | Covers |
 | --- | --- |
 | `docs/testing.md` | Compatibility suites, fuzzing and turning fuzz failures into regressions |
+| `docs/releasing.md` | Publishing a version to npm |
 
 ## ADR
 

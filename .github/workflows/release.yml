@@ -1,0 +1,139 @@
+name: Release
+
+# A `vX.Y.Z` tag publishes that version; a manual run goes through every step
+# without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Loads `native/index.cjs` alone: it throws when the addon cannot load, where
+  # the package would fall back to WebAssembly.
+  SMOKE_TEST: >-
+    const addon = require('./native/index.cjs');
+    const { expression } = addon.parseExpression('1 + 2', 'a');
+    if (!expression.includes('"+"')) throw new Error(expression);
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # The parts of the package that are the same on every platform.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - run: pnpm build:native
+      - run: pnpm build:wasm
+      - run: pnpm build:ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: |
+            dist
+            wasm
+            native/index.cjs
+            native/index.d.cts
+
+  build:
+    strategy:
+      matrix:
+        include:
+          - { platform: linux-x64-gnu, target: x86_64-unknown-linux-gnu, os: ubuntu-latest, flags: --use-napi-cross }
+          - { platform: linux-arm64-gnu, target: aarch64-unknown-linux-gnu, os: ubuntu-latest, flags: --use-napi-cross }
+          - { platform: linux-x64-musl, target: x86_64-unknown-linux-musl, os: ubuntu-latest, flags: --cross-compile }
+          - { platform: linux-arm64-musl, target: aarch64-unknown-linux-musl, os: ubuntu-latest, flags: --cross-compile }
+          - { platform: darwin-x64, target: x86_64-apple-darwin, os: macos-latest }
+          - { platform: darwin-arm64, target: aarch64-apple-darwin, os: macos-latest }
+          - { platform: win32-x64-msvc, target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: rustup toolchain install && rustup target add ${{ matrix.target }}
+        shell: bash
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: matrix.flags == '--cross-compile'
+        uses: mlugg/setup-zig@v2
+      - if: matrix.flags == '--cross-compile'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - run: pnpm build:native --release --target ${{ matrix.target }} ${{ matrix.flags }}
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.platform }}
+          path: native/fast-publicodes.${{ matrix.platform }}.node
+          if-no-files-found: error
+
+  # The whole test suite on each platform.
+  test:
+    needs: [package, build]
+    strategy:
+      matrix:
+        include:
+          - { platform: linux-x64-gnu, os: ubuntu-latest }
+          - { platform: linux-x64-musl, os: ubuntu-latest, image: "node:22-alpine" }
+          - { platform: linux-arm64-gnu, os: ubuntu-24.04-arm }
+          - { platform: linux-arm64-musl, os: ubuntu-24.04-arm, image: "node:22-alpine" }
+          - { platform: darwin-x64, os: macos-15-intel }
+          - { platform: darwin-arm64, os: macos-latest }
+          - { platform: win32-x64-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: package
+      - uses: actions/download-artifact@v5
+        with:
+          name: bindings-${{ matrix.platform }}
+          path: native
+      - if: ${{ !matrix.image }}
+        uses: ./.github/actions/setup
+      - if: ${{ !matrix.image }}
+        run: node -e "$SMOKE_TEST" && pnpm test
+        shell: bash
+      - if: ${{ matrix.image }}
+        run: >-
+          docker run --rm -e SMOKE_TEST -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 -v "$PWD:/w" -w /w ${{ matrix.image }}
+          sh -c 'corepack enable && pnpm install --frozen-lockfile && node -e "$SMOKE_TEST" && pnpm test'
+
+  publish:
+    needs: [ci, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DRY_RUN: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - name: Check that the tag names the package version
+        if: env.DRY_RUN == 'false'
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global npm@11
+      - uses: actions/download-artifact@v5
+        with:
+          name: package
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: bindings-*
+          path: native
+          merge-multiple: true
+      - run: npm publish --access public ${{ env.DRY_RUN == 'true' && '--dry-run' || '' }}

@@ -1,0 +1,13 @@
+name: Setup
+description: Node, pnpm and the package's dependencies.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v5
+      with:
+        node-version-file: .node-version
+        cache: pnpm
+        registry-url: https://registry.npmjs.org
+    - run: pnpm install --frozen-lockfile
+      shell: bash

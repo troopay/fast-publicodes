@@ -20,6 +20,9 @@ importers:
       '@napi-rs/cli':
         specifier: 3.10.8
         version: 3.10.8(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.20.5)
+      '@napi-rs/cross-toolchain':
+        specifier: 1.0.3
+        version: 1.0.3
       '@types/node':
         specifier: 22.20.5
         version: 22.20.5

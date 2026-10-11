@@ -1,8 +1,21 @@
 {
   "name": "fast-publicodes",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A drop-in replacement for publicodes, with the engine written in Rust.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/troopay/fast-publicodes.git"
+  },
+  "homepage": "https://github.com/troopay/fast-publicodes#readme",
+  "bugs": "https://github.com/troopay/fast-publicodes/issues",
+  "keywords": [
+    "publicodes",
+    "rules",
+    "engine",
+    "rust",
+    "webassembly"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,7 +40,7 @@
   },
   "scripts": {
     "build": "pnpm build:native --release && pnpm build:wasm && pnpm build:ts",
-    "build:native": "napi build --platform --esm --manifest-path crates/node/Cargo.toml --output-dir native --js index.js --dts index.d.ts",
+    "build:native": "napi build --platform --manifest-path crates/node/Cargo.toml --output-dir native --js index.cjs --dts index.d.cts",
     "build:wasm": "cargo build -p fast-publicodes-wasm --target wasm32-unknown-unknown --profile wasm && wasm-bindgen --target web --out-dir wasm --out-name fast_publicodes target/wasm32-unknown-unknown/wasm/fast_publicodes_wasm.wasm",
     "build:ts": "tsc -p tsconfig.build.json",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check && biome check && tsc --noEmit",
@@ -41,6 +54,7 @@
     "@biomejs/biome": "2.5.15",
     "@incubateur-ademe/nosgestesclimat": "4.17.2",
     "@napi-rs/cli": "3.10.8",
+    "@napi-rs/cross-toolchain": "1.0.3",
     "@types/node": "22.20.5",
     "modele-social": "11.1.0",
     "publicodes": "1.10.4",
