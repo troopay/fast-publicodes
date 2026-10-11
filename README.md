@@ -1,6 +1,39 @@
 # fast-publicodes
 
-A drop-in replacement for [publicodes](https://publi.codes) 1.x: the same API and behaviour, with the engine written in Rust. Node loads it as a native addon; browsers and other runtimes load it as WebAssembly, from the same package.
+A port of [publicodes](https://github.com/publicodes/publicodes) 1.x with its engine rewritten in Rust: the same API and the same behaviour, faster. Node loads it as a native addon; browsers and other runtimes load it as WebAssembly, from the same package.
+
+> **Not affiliated with the publicodes project.** fast-publicodes is an independent port. The language, its features and every discussion about them belong to [publicodes](https://github.com/publicodes/publicodes): propose features and report language issues there, not here. If publicodes is useful to you, support its authors: star the repository, contribute, and credit them.
+
+## When to use it
+
+Use fast-publicodes where evaluating publicodes rules is a bottleneck:
+
+- **On a server**: APIs, batch jobs or simulations that evaluate many situations, where each evaluation costs CPU time and latency.
+- **In a client**: large rule sets recomputed on every input, or slower devices, where evaluation delays the interface.
+
+Stay with publicodes when its speed is enough for you, or when you need what fast-publicodes does not provide (see [Limitations](#limitations)), such as the explanations publicodes-react renders. In a browser, also weigh the size of the WebAssembly module against the time it saves.
+
+## Usage
+
+Replace the import; nothing else changes.
+
+```ts
+import Engine from "fast-publicodes";
+
+const engine = new Engine(rules);
+engine.setSituation({ "salaire brut": 3000 }).evaluate("salaire net");
+```
+
+## Performance
+
+On the [modele-social](https://www.npmjs.com/package/modele-social) rules (`pnpm bench`, Node, one machine):
+
+| Operation | publicodes | fast-publicodes | Speed-up |
+| --- | --- | --- | --- |
+| Parse the rules | 366 ms | 68 ms | 5× |
+| Set a situation and evaluate one rule | 23.7 ms | 0.75 ms | 32× |
+| Set a situation and evaluate every rule | 313 ms | 18 ms | 18× |
+| `shallowCopy()` | 6.2 ms | 0.42 ms | 15× |
 
 ## Limitations
 
@@ -8,21 +41,23 @@ A drop-in replacement for [publicodes](https://publi.codes) 1.x: the same API an
 - **No internal fields.** The members `publicodes` marks as internal (`context`, `baseContext`, `publicParsedRules`, `cache` and `evaluateNode`) do not exist.
 - **`undefined` inside rules.** A property of a rule set to `undefined` counts as absent, where `publicodes` reads some of them as an empty value.
 
-## Requirements
+## Development
+
+### Requirements
 
 - Node 22+
 - pnpm 10.33
 - Rust via rustup (the pinned toolchain installs itself)
 - `wasm-bindgen-cli` 0.2.129, for the WebAssembly module: `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
 
-## Installation
+### Setup
 
 ```bash
 pnpm install
 pnpm build:native
 ```
 
-## Commands
+### Commands
 
 | Command | Purpose |
 | --- | --- |
