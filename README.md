@@ -71,3 +71,7 @@ pnpm build:native
 | `FUZZ_SEED=100 pnpm test test/compat/fuzz.test.ts` | Fuzz new seeds; see [docs/testing.md](docs/testing.md) |
 | `cargo test` | Rust tests |
 | `pnpm bench` | Benchmarks against publicodes |
+
+## License
+
+[MIT](LICENSE), including the notice of publicodes, from which this port derives.
