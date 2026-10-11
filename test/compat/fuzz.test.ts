@@ -16,7 +16,7 @@ const save = Boolean(process.env.FUZZ_SAVE);
 for (const suite of await loadSuites()) {
   describe(suite.name, () => {
     for (let seed = firstSeed; seed < firstSeed + runs; seed++) {
-      test(`seed ${seed}`, { timeout: 60_000 }, async () => {
+      test(`seed ${seed}`, async () => {
         const situation = generate(await inputsOf(suite), seed);
         const expected = await expectedOutcomes(suite, situation);
         const names = rulesOf(expected);

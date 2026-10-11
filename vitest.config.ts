@@ -5,7 +5,11 @@ import { defineConfig } from "vitest/config";
 const target = process.env.FAST_PUBLICODES_TARGET;
 
 export default defineConfig({
-  test: { include: ["test/**/*.test.ts"] },
+  test: {
+    include: ["test/**/*.test.ts"],
+    // Comparisons build and evaluate whole models with publicodes, slow on some CI runners.
+    testTimeout: 60_000,
+  },
   resolve: {
     alias:
       target === "wasm"

@@ -17,7 +17,7 @@ for (const suite of await loadSuites()) {
       expect(types(candidate)).toEqual(types(oracle));
     });
 
-    test("suggestions", { timeout: 60_000 }, () => {
+    test("suggestions", () => {
       const oracle = new PublicodesEngine(suite.rules as never);
       const candidate = new Engine(suite.rules);
       const names = Object.keys(oracle.getParsedRules());
@@ -43,7 +43,7 @@ for (const suite of await loadSuites()) {
     });
 
     for (const [name, situation] of Object.entries(suite.situations)) {
-      test(name, { timeout: 60_000 }, async () => {
+      test(name, async () => {
         const expected = await expectedOutcomes(suite, situation);
         const names = rulesOf(expected);
         const mismatches = diff(
