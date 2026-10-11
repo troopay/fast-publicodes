@@ -6,6 +6,8 @@
 
 `pnpm test:wasm` runs every test against the WebAssembly module instead of the Node addon.
 
+`test/types.ts`, checked by `tsc` during `pnpm lint`, asserts that the package's types are interchangeable with those of `publicodes`, AST fields apart.
+
 ## Suites
 
 Each `test/compat/suites/<name>.yaml` is a suite: `rules` holds the rules inline, or the name of a package exporting them (`modele-social`); `situations` maps names to situations.

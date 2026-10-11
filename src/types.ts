@@ -29,13 +29,11 @@ export interface EvaluatedNode {
 
 /** One of the values a rule with `une possibilité` takes. */
 export interface Possibility {
-  nodeKind: "reference" | "constant";
   type: "number" | "string" | "reference";
   nodeValue: string | number;
   publicodesValue: string;
   notApplicable: { nodeKind: string; nodeValue: Evaluation };
   unit?: Unit;
-  name?: string;
   dottedName?: string;
   title?: string;
 }
@@ -95,3 +93,33 @@ export interface EngineOptions {
   warn?: boolean | WarnOptions;
   getUnitKey?: GetUnitKey;
 }
+
+type BinaryOperator =
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "**"
+  | ">"
+  | "<"
+  | ">="
+  | "<="
+  | "="
+  | "!=";
+
+export type BinaryOp = {
+  [Operator in BinaryOperator]: { [Key in Operator]: [ExprAST, ExprAST] };
+}[BinaryOperator];
+
+export type UnaryOp = {
+  "-": [{ constant: { type: "number"; nodeValue: 0 } }, ExprAST];
+};
+
+/** The tree of a publicodes expression. */
+export type ExprAST =
+  | BinaryOp
+  | UnaryOp
+  | { variable: string }
+  | { constant: { type: "number"; nodeValue: number; rawUnit?: string } }
+  | { constant: { type: "boolean"; nodeValue: boolean } }
+  | { constant: { type: "string" | "date"; nodeValue: string } };
