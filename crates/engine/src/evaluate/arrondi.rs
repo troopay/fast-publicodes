@@ -3,16 +3,22 @@ use std::rc::Rc;
 use super::js_value::power;
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::units::{serialize_unit, simplify_unit};
 
-/// `Math.round`: halves round towards positive infinity.
+/// `Math.round`: halves round towards positive infinity, and a negative value rounding to 0
+/// gives -0.
 fn js_round(x: f64) -> f64 {
     if !x.is_finite() {
         return x;
     }
     let floor = x.floor();
-    if x - floor >= 0.5 { floor + 1. } else { floor }
+    let rounded = if x - floor >= 0.5 { floor + 1. } else { floor };
+    if rounded == 0. && x.is_sign_negative() {
+        -0.
+    } else {
+        rounded
+    }
 }
 
 fn round_with_precision(n: f64, digits: f64) -> f64 {
@@ -40,20 +46,21 @@ impl Evaluator<'_> {
     pub(super) fn arrondi(&mut self, valeur: NodeId, arrondi: NodeId) -> Result<Evaluated> {
         let valeur = self.evaluate(valeur)?;
         let valeur = self.simplify_node_unit(valeur)?;
-        let arrondi = if valeur.value == Value::Bool(false) {
-            None
-        } else {
-            let arrondi = self.evaluate(arrondi)?;
-            if let Value::Number(_) = arrondi.value
-                && !serialize_unit(arrondi.unit.unit()).is_some_and(|u| u.contains("décimale"))
-            {
-                return Err(Error::evaluation(format!(
+        let arrondi =
+            if valeur.value == Value::Bool(false) {
+                None
+            } else {
+                let arrondi = self.evaluate(arrondi)?;
+                if let Value::Number(_) = arrondi.value
+                    && !serialize_unit(arrondi.unit.unit()).is_some_and(|u| u.contains("décimale"))
+                {
+                    return Err(self.error(format!(
                     "L'unité {} de l'arrondi est inconnu. Vous devez utiliser l'unité “décimales”",
-                    serialize_unit(arrondi.unit.unit()).unwrap_or_default()
+                    serialize_unit(arrondi.unit.unit()).as_deref().unwrap_or("undefined")
                 )));
-            }
-            Some(arrondi)
-        };
+                }
+                Some(arrondi)
+            };
         let value = match (&valeur.value, arrondi.as_ref().map(|a| &a.value)) {
             (Value::Number(n), Some(Value::Number(digits))) => {
                 Value::Number(round_with_precision(*n, *digits))

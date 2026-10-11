@@ -2,13 +2,14 @@ import { inspect, isDeepStrictEqual } from "node:util";
 import { serializeUnit } from "publicodes";
 import type { EvaluatedNode, Situation } from "../../src/index.js";
 
-export type Outcome =
+export type Outcome = (
   | { error: string }
   | {
       nodeValue?: EvaluatedNode["nodeValue"];
       unit?: string;
       missingVariables: Record<string, number>;
-    };
+    }
+) & { warnings?: string[] };
 
 export type Outcomes = Record<string, Outcome>;
 
@@ -25,20 +26,52 @@ interface EvaluatingEngine {
 
 const RELATIVE_TOLERANCE = 1e-9;
 
+/** The outcome holding what setting the situation logged. */
+const SITUATION = "(situation)";
+
+/** The rules evaluated in `outcomes`. */
+export function rulesOf(outcomes: Outcomes | string[]): string[] {
+  const names = Array.isArray(outcomes) ? outcomes : Object.keys(outcomes);
+  return names.filter((name) => name !== SITUATION);
+}
+
+const recorded: string[] = [];
+
+/** A logger keeping the warnings for the outcomes `evaluateAll` builds. */
+export const recordingLogger = {
+  log() {},
+  error() {},
+  warn(message: string) {
+    recorded.push(message);
+  },
+};
+
+function withWarnings<T extends object>(outcome: T): T & Outcome {
+  const warnings = recorded.splice(0);
+  return { ...outcome, ...(warnings.length && { warnings }) } as T & Outcome;
+}
+
 export function evaluateAll(
   engine: EvaluatingEngine,
   situation: Situation,
   names: string[],
 ): Outcomes {
+  recorded.length = 0;
   try {
     engine.setSituation(situation);
   } catch (error) {
     const outcome = { error: messageOf(error) };
-    return Object.fromEntries(names.map((name) => [name, outcome]));
+    return {
+      [SITUATION]: withWarnings({ missingVariables: {} }),
+      ...Object.fromEntries(names.map((name) => [name, outcome])),
+    };
   }
-  return Object.fromEntries(
-    names.map((name) => [name, evaluateOne(engine, name)]),
-  );
+  return {
+    [SITUATION]: withWarnings({ missingVariables: {} }),
+    ...Object.fromEntries(
+      names.map((name) => [name, withWarnings(evaluateOne(engine, name))]),
+    ),
+  };
 }
 
 function evaluateOne(engine: EvaluatingEngine, name: string): Outcome {
@@ -55,7 +88,9 @@ function evaluateOne(engine: EvaluatingEngine, name: string): Outcome {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
 }
 
 export function diff(expected: Outcomes, received: Outcomes): Mismatch[] {
@@ -68,11 +103,17 @@ export function diff(expected: Outcomes, received: Outcomes): Mismatch[] {
 }
 
 function sameOutcome(a: Outcome, b: Outcome): boolean {
-  if ("error" in a || "error" in b) return "error" in a && "error" in b;
+  if (!isDeepStrictEqual(a.warnings, b.warnings)) return false;
+  if ("error" in a || "error" in b) {
+    return "error" in a && "error" in b && a.error === b.error;
+  }
   return (
     sameValue(a.nodeValue, b.nodeValue) &&
     a.unit === b.unit &&
-    isDeepStrictEqual(a.missingVariables, b.missingVariables)
+    isDeepStrictEqual(
+      Object.entries(a.missingVariables),
+      Object.entries(b.missingVariables),
+    )
   );
 }
 

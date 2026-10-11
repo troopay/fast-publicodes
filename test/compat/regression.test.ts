@@ -1,5 +1,5 @@
 import { describe, test } from "vitest";
-import { diff, evaluateAll, report } from "./outcome.js";
+import { diff, evaluateAll, report, rulesOf } from "./outcome.js";
 import { expectedOutcomes, loadSuites } from "./suites.js";
 
 for (const suite of await loadSuites()) {
@@ -7,7 +7,7 @@ for (const suite of await loadSuites()) {
     for (const [name, situation] of Object.entries(suite.situations)) {
       test(name, { timeout: 60_000 }, async () => {
         const expected = await expectedOutcomes(suite, situation);
-        const names = Object.keys(expected);
+        const names = rulesOf(expected);
         const mismatches = diff(
           expected,
           evaluateAll(suite.candidate(), situation, names),

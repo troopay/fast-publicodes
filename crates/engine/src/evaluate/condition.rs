@@ -1,6 +1,6 @@
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::units::UnitRef;
 
 /// A branch of a condition: a node, or `est non applicable` of a node.
@@ -9,6 +9,8 @@ pub enum Branch {
     Node(NodeId),
     NotApplicable(NodeId),
 }
+
+const NOT_BOOLEAN: &str = "La condition doit être de type booléen";
 
 impl Evaluator<'_> {
     fn branch(&mut self, branch: Branch) -> Result<Evaluated> {
@@ -33,9 +35,8 @@ impl Evaluator<'_> {
         sinon: Branch,
     ) -> Result<Evaluated> {
         let condition = self.evaluate(si)?;
-        let not_boolean = || Error::evaluation("La condition doit être de type booléen");
         if !matches!(condition.unit, UnitSlot::Absent) {
-            return Err(not_boolean());
+            return Err(self.error(NOT_BOOLEAN));
         }
         let (evaluation, alors_unit) = match condition.value {
             Value::Bool(true) => {
@@ -55,7 +56,7 @@ impl Evaluator<'_> {
                 };
                 (evaluation, unit)
             }
-            _ => return Err(not_boolean()),
+            _ => return Err(self.error(NOT_BOOLEAN)),
         };
         let unit = evaluation.unit.get().cloned().or(alors_unit);
         Ok(Evaluated {

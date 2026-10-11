@@ -1,10 +1,11 @@
-import { binding, type NativeEngine } from "./binding.js";
+import { binding, type NativeEngine, toJson } from "./binding.js";
 import {
   fromNative,
   type NativeError,
   PublicodesError,
   restoreSurrogates,
 } from "./error.js";
+import { resolveOptions } from "./options.js";
 import type {
   EngineOptions,
   EvaluatedNode,
@@ -26,11 +27,12 @@ type NativeWarnings = {
 
 type NativeResult<T> = ({ error: string } | T) & NativeWarnings;
 
-type NativeEvaluation = NativeResult<{
-  nodeValue: EvaluatedNode["nodeValue"];
-  unit?: Unit;
-  missing: unknown;
-}>;
+/** A unit as the binding reports it: new ones whole, known ones by index. */
+type NativeUnit = { unit?: number; newUnit?: Unit; unitsReset?: boolean };
+
+type NativeEvaluation = NativeResult<
+  { nodeValue: EvaluatedNode["nodeValue"]; index: number } & NativeUnit
+>;
 
 function unwrap<T extends object>(result: NativeResult<T>): T {
   if ("error" in result) {
@@ -76,6 +78,7 @@ class UnitKey {
 function createNative(
   rules: RawPublicodes,
   options: EngineOptions,
+  logger: Logger,
   unitKey: UnitKey | undefined,
 ): NativeEngine {
   if (typeof rules === "string") {
@@ -85,23 +88,26 @@ function createNative(
       {},
     );
   }
-  const { logger: _, getUnitKey: __, ...serializable } = options;
+
   try {
     return new (binding().Engine)(
-      JSON.stringify(rules),
-      JSON.stringify(serializable),
+      toJson(rules),
+      JSON.stringify(resolveOptions(options)),
       today,
       unitKey?.call,
     );
   } catch (error) {
     unitKey?.rethrow();
-    let details: NativeError | undefined;
+    let details: NativeError & { warnings: string[] };
     try {
       details = JSON.parse((error as Error).message);
     } catch {
       throw error;
     }
-    throw fromNative(details as NativeError);
+    for (const warning of details.warnings) {
+      logger.warn(restoreSurrogates(warning));
+    }
+    throw fromNative(details);
   }
 }
 
@@ -115,6 +121,9 @@ export class Engine<RuleNames extends string = string> {
   private unitKey: UnitKey | undefined;
   /** Results by evaluated value, until the cache is reset. */
   private evaluations = new Map<PublicodesExpression, EvaluatedNode>();
+  /** The engine's handle on the evaluations of the current cache. */
+  private evaluationsHandle: unknown;
+  private units: Unit[] = [];
 
   constructor(
     rules: RawPublicodes<RuleNames> = {},
@@ -122,7 +131,7 @@ export class Engine<RuleNames extends string = string> {
   ) {
     this.logger = options.logger ?? console;
     this.unitKey = options.getUnitKey && new UnitKey(options.getUnitKey);
-    this.native = createNative(rules, options, this.unitKey);
+    this.native = createNative(rules, options, this.logger, this.unitKey);
     this.logWarnings(this.native.takeWarnings() as NativeWarnings);
   }
 
@@ -147,11 +156,11 @@ export class Engine<RuleNames extends string = string> {
       strict = false,
     }: { keepPreviousSituation?: boolean; strict?: boolean } = {},
   ): this {
-    this.evaluations = new Map();
+    this.resetEvaluations();
     const result = this.native.setSituation(
-      JSON.stringify(situation),
-      keepPreviousSituation,
-      strict,
+      toJson(situation),
+      Boolean(keepPreviousSituation),
+      Boolean(strict),
     ) as { accepted: RuleNames[] } & NativeWarnings &
       ({ error: string; situationReset: boolean } | { error?: undefined });
     this.logWarnings(result);
@@ -197,22 +206,23 @@ export class Engine<RuleNames extends string = string> {
         {},
       );
     }
-    const result = (
-      typeof value === "string"
-        ? this.native.evaluate(value, false)
-        : this.native.evaluate(JSON.stringify(value ?? null), true)
-    ) as NativeEvaluation;
+    const json = typeof value !== "string";
+    const text = json ? toJson(value) : value;
+    const result = this.native.evaluate(text, json) as NativeEvaluation;
     this.logWarnings(result);
     this.unitKey?.rethrow();
-    const { nodeValue, unit, missing } = unwrap(result);
+    const { nodeValue, index, ...nativeUnit } = unwrap(result);
+    const unit = this.unitOf(nativeUnit);
     const native = this.native;
+    this.evaluationsHandle ??= native.evaluations();
+    const handle = this.evaluationsHandle;
     let missingVariables: Record<string, number> | undefined;
     const evaluation = {
       nodeValue,
       ...(unit && { unit }),
       // Built on first read: most callers only need the value.
       get missingVariables() {
-        missingVariables ??= native.missingVariables(missing) as Record<
+        missingVariables ??= native.missingVariables(handle, index) as Record<
           string,
           number
         >;
@@ -250,9 +260,12 @@ export class Engine<RuleNames extends string = string> {
     dottedName: RuleNames,
     { filterNotApplicable = false }: { filterNotApplicable?: boolean } = {},
   ): Possibility[] | null {
-    const result = this.native.possibilities(
+    if (!filterNotApplicable) {
+      const { possibilities } = this.getRule(dottedName);
+      return possibilities ? possibilities.explanation : null;
+    }
+    const result = this.native.applicablePossibilities(
       dottedName,
-      filterNotApplicable,
     ) as NativeResult<{ possibilities: string }>;
     this.logWarnings(result);
     return JSON.parse(unwrap(result).possibilities);
@@ -263,8 +276,22 @@ export class Engine<RuleNames extends string = string> {
   }
 
   resetCache(): void {
-    this.evaluations = new Map();
+    this.resetEvaluations();
     this.native.resetCache();
+  }
+
+  private resetEvaluations() {
+    this.evaluations = new Map();
+    this.evaluationsHandle = undefined;
+  }
+
+  private unitOf({ unit, newUnit, unitsReset }: NativeUnit): Unit | undefined {
+    if (unitsReset) this.units = [];
+    if (newUnit) {
+      this.units.push(newUnit);
+      return newUnit;
+    }
+    return unit === undefined ? undefined : this.units[unit];
   }
 
   shallowCopy({
@@ -274,7 +301,7 @@ export class Engine<RuleNames extends string = string> {
     inherit?: boolean;
   } = {}): Engine<RuleNames> {
     const copy = Object.create(Engine.prototype) as Engine<RuleNames>;
-    copy.native = this.native.shallowCopy(copyCache);
+    copy.native = this.native.shallowCopy(Boolean(copyCache));
     copy.logger = this.logger;
     copy.publicSituation = { ...this.publicSituation };
     copy.parsedRules = this.parsedRules;
@@ -282,6 +309,8 @@ export class Engine<RuleNames extends string = string> {
     copy.warningTexts = [...this.warningTexts];
     copy.unitKey = this.unitKey;
     copy.evaluations = copyCache ? new Map(this.evaluations) : new Map();
+    copy.evaluationsHandle = undefined;
+    copy.units = [...this.units];
     return copy;
   }
 }

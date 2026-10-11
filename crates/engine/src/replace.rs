@@ -1,94 +1,171 @@
 //! Replacements: each reference to a replaced rule becomes a `variations` node that picks the
 //! first applicable replacing rule, then the reference itself.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
 use crate::ast::{
-    Branch, ContextePair, NameId, Node, NodeId, Program, Replacement, SourceArgs, Value,
+    Branch, Constant, ContextePair, NameId, Node, NodeId, Program, Replacement, Replacements,
+    SourceArgs, Value,
 };
 use crate::collation::{Weights, weights};
 use crate::error::{Error, ErrorKind, Result};
-use crate::parse::default_constant;
 
-fn target(program: &Program, reference: NodeId) -> Option<NameId> {
-    match program.node(reference) {
-        Node::Reference(reference) => reference.target,
-        _ => None,
-    }
-}
-
-/// Inlines replacements into `rules`. The base rules get their own replacements; rules added
-/// later get the base ones.
+/// Inlines replacements into `rules`, and returns the replacements the program has once they
+/// are defined, if they change.
+///
+/// The base rules get their own replacements. Rules added later get the previous ones, and their
+/// own apply to every rule that references what they replace, added to `rules` when defined
+/// before.
 pub fn inline_replacements(
     program: &mut Program,
-    rules: &mut [(NameId, NodeId)],
+    rules: &mut Vec<(NameId, NodeId)>,
     uses: &[(NameId, NameId)],
     overlay: bool,
-) -> Result<()> {
-    let (replacements, affected): (FxHashMap<NameId, Vec<Replacement>>, FxHashSet<NameId>) =
-        if overlay {
-            let replacements = std::mem::take(&mut program.replacements);
-            let affected = uses
-                .iter()
-                .filter(|(_, used)| replacements.contains_key(used))
-                .map(|&(rule, _)| rule)
-                .collect();
-            (replacements, affected)
-        } else {
-            let mut replacements: FxHashMap<NameId, Vec<Replacement>> = FxHashMap::default();
-            for &(_, node) in rules.iter() {
-                let Node::Rule(rule) = program.node(node) else {
-                    continue;
-                };
-                for replacement in &rule.replacements {
-                    let replaced = target(program, replacement.replaced).ok_or_else(|| {
-                        Error::new(
-                            ErrorKind::Internal,
-                            "Le remplacement ne référence pas une règle",
-                        )
-                    })?;
-                    replacements
-                        .entry(replaced)
-                        .or_default()
-                        .push(replacement.clone());
-                }
-            }
-            for candidates in replacements.values_mut() {
-                sort_replacements(program, candidates);
-            }
-            let affected = uses
-                .iter()
-                .filter(|(_, used)| replacements.contains_key(used))
-                .map(|&(rule, _)| rule)
-                .collect();
-            (replacements, affected)
-        };
-    if !affected.is_empty() {
-        let mut inliner = Inliner {
-            program,
-            replacements: &replacements,
-        };
-        for (name, node) in rules.iter_mut() {
-            if affected.contains(name) {
-                *node = inliner.inline(*node);
-            }
+) -> Result<Option<Replacements>> {
+    if !overlay {
+        let replacements = rule_replacements(program, rules)?;
+        let affected = users(uses, &replacements);
+        inline(program, rules, &affected, &replacements);
+        return Ok(Some(replacements));
+    }
+    let previous = std::mem::take(&mut program.replacements);
+    let affected = users(uses, &previous);
+    inline(program, rules, &affected, &previous);
+    let added = rule_replacements(program, rules);
+    program.replacements = previous;
+    let added = added?;
+    if added.is_empty() {
+        return Ok(None);
+    }
+    let affected = rules_referencing(program, rules, &added);
+    for &name in &affected {
+        if !rules.iter().any(|&(n, _)| n == name)
+            && let Some(node) = program.rule_node(name)
+        {
+            rules.push((name, node));
         }
     }
-    program.replacements = replacements;
-    Ok(())
+    inline(program, rules, &affected, &added);
+    let mut merged = program.replacements.clone();
+    for (replaced, mut list) in added {
+        let previous = merged.entry(replaced).or_default();
+        list.append(previous);
+        sort_by_precedence(program, &mut list);
+        *previous = list;
+    }
+    Ok(Some(merged))
+}
+
+/// The replacements `rules` define, by replaced rule, in the order they are tried.
+fn rule_replacements(program: &Program, rules: &[(NameId, NodeId)]) -> Result<Replacements> {
+    let mut replacements = Replacements::default();
+    for &(_, node) in rules {
+        let Node::Rule(rule) = program.node(node) else {
+            continue;
+        };
+        for replacement in &rule.replacements {
+            let replaced = program.target(replacement.replaced).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Internal,
+                    "Le remplacement ne référence pas une règle",
+                )
+            })?;
+            replacements
+                .entry(replaced)
+                .or_default()
+                .push(replacement.clone());
+        }
+    }
+    for candidates in replacements.values_mut() {
+        candidates.reverse();
+        sort_by_precedence(program, candidates);
+    }
+    Ok(replacements)
+}
+
+/// The rules among `uses` that reference a replaced rule.
+fn users(uses: &[(NameId, NameId)], replacements: &Replacements) -> FxHashSet<NameId> {
+    uses.iter()
+        .filter(|(_, used)| replacements.contains_key(used))
+        .map(|&(rule, _)| rule)
+        .collect()
+}
+
+/// The rules, defined or among `rules`, whose tree references a replaced rule.
+fn rules_referencing(
+    program: &Program,
+    rules: &[(NameId, NodeId)],
+    replacements: &Replacements,
+) -> FxHashSet<NameId> {
+    program
+        .names
+        .ids()
+        .filter_map(|name| {
+            let node = rules
+                .iter()
+                .find(|&&(n, _)| n == name)
+                .map(|&(_, node)| node)
+                .or_else(|| program.rule_node(name))?;
+            references_any(program, node, replacements).then_some(name)
+        })
+        .collect()
+}
+
+fn references_any(program: &Program, root: NodeId, replacements: &Replacements) -> bool {
+    let mut visited = FxHashSet::default();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        match program.node(id) {
+            Node::Reference(reference) => {
+                if reference
+                    .target
+                    .is_some_and(|target| replacements.contains_key(&target))
+                {
+                    return true;
+                }
+            }
+            node => stack.extend(node.children()),
+        }
+    }
+    false
+}
+
+fn inline(
+    program: &mut Program,
+    rules: &mut [(NameId, NodeId)],
+    affected: &FxHashSet<NameId>,
+    replacements: &Replacements,
+) {
+    if affected.is_empty() {
+        return;
+    }
+    let mut inliner = Inliner {
+        program,
+        replacements,
+    };
+    for (name, node) in rules.iter_mut() {
+        if affected.contains(name) {
+            *node = inliner.inline(*node);
+        }
+    }
 }
 
 fn name_of(program: &Program, reference: NodeId) -> &str {
-    target(program, reference).map_or("", |name| program.names.name(name))
+    program
+        .target(reference)
+        .map_or("", |name| program.names.name(name))
 }
 
 /// The replacements of `replaced` that apply to a reference written in `context`, in the
 /// order they are tried.
 pub fn applicable_replacements<'a>(
     program: &Program,
-    replacements: &'a FxHashMap<NameId, Vec<Replacement>>,
+    replacements: &'a Replacements,
     replaced: NameId,
     context: NameId,
 ) -> Vec<&'a Replacement> {
@@ -98,7 +175,7 @@ pub fn applicable_replacements<'a>(
     let context_name = program.names.name(context);
     candidates
         .iter()
-        .filter(|r| target(program, r.definition) != Some(context))
+        .filter(|r| program.target(r.definition) != Some(context))
         .filter(|r| {
             r.whitelist.is_empty()
                 || r.whitelist
@@ -113,11 +190,10 @@ pub fn applicable_replacements<'a>(
         .collect()
 }
 
-/// Orders the replacements of a rule as they are tried: by decreasing priority, then by
-/// decreasing name of the rule defining them, the last defined first among equals. Filtering
-/// keeps this order, so it is computed once.
-fn sort_replacements(program: &Program, replacements: &mut [Replacement]) {
-    replacements.reverse();
+/// Orders replacements as they are tried: by decreasing priority, then by decreasing name of
+/// the rule defining them, keeping their order among equals. The last defined come first, and
+/// filtering keeps this order, so it is computed once.
+fn sort_by_precedence(program: &Program, replacements: &mut [Replacement]) {
     let mut keyed: Vec<(f64, Weights, Replacement)> = replacements
         .iter()
         .map(|r| {
@@ -140,10 +216,11 @@ fn sort_replacements(program: &Program, replacements: &mut [Replacement]) {
 
 struct Inliner<'a> {
     program: &'a mut Program,
-    replacements: &'a FxHashMap<NameId, Vec<Replacement>>,
+    replacements: &'a Replacements,
 }
 
 impl Inliner<'_> {
+    /// Copies the tree under `id` with replacements inlined, once for each place it appears.
     fn inline(&mut self, id: NodeId) -> NodeId {
         match self.program.node(id) {
             Node::Reference(_) => self.replace(id),
@@ -236,11 +313,8 @@ impl Inliner<'_> {
 
     fn constant(&mut self, value: Value) -> NodeId {
         let constant = match value {
-            Value::Null => crate::ast::Constant {
-                nullable: Some(true),
-                ..crate::ast::Constant::new(Value::Null)
-            },
-            value => default_constant(value),
+            Value::Null => Constant::not_applicable(),
+            value => Constant::default_of(value),
         };
         self.program.push(Node::Constant(constant))
     }

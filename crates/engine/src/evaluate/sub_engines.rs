@@ -12,10 +12,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::units::serialize_unit;
 
 fn target(program: &Program, reference: NodeId) -> Result<NameId> {
-    match program.node(reference) {
-        Node::Reference(reference) => reference.target.ok_or_else(unresolved),
-        _ => Err(unresolved()),
-    }
+    program.target(reference).ok_or_else(unresolved)
 }
 
 fn unresolved() -> Error {
@@ -75,7 +72,7 @@ fn uniroot(
     lower: f64,
     upper: f64,
     error_tolerance: f64,
-    mut max_iterations: u32,
+    mut max_iterations: f64,
     acceptable_tolerance: f64,
 ) -> Result<Option<f64>> {
     let (mut a, mut b) = (lower, upper);
@@ -84,8 +81,8 @@ fn uniroot(
     let mut fb = f(b)?;
     let mut fc = fa;
     let mut fallback = None;
-    while max_iterations > 0 {
-        max_iterations -= 1;
+    while max_iterations > 0. {
+        max_iterations -= 1.;
         let previous_step = b - a;
         if fc.abs() < fb.abs() {
             (a, b, c) = (b, c, b);
@@ -363,7 +360,8 @@ impl Evaluator<'_> {
                 };
                 Ok(to_number(&y) - goal)
             };
-            value = uniroot(&mut test, below, above, tolerance, 10, 1.)?;
+            let iterations = program.options.inversion_max_iterations.unwrap_or(10.);
+            value = uniroot(&mut test, below, above, tolerance, iterations, 1.)?;
             if let Some(v) = value
                 && v != 0.
                 && !v.is_nan()
@@ -416,7 +414,8 @@ impl Evaluator<'_> {
                 }
                 Ok(to_number(&iteration.evaluate(x)?.value) - x)
             };
-            uniroot(&mut test, -1_000_000., 100_000_000., 0.5, 25, 2.)?
+            let iterations = program.options.inversion_max_iterations.unwrap_or(25.);
+            uniroot(&mut test, -1_000_000., 100_000_000., 0.5, iterations, 2.)?
         };
         if let Some(value) = value {
             iteration.evaluate(value)?;

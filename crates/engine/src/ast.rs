@@ -65,6 +65,28 @@ impl Constant {
             unit: None,
         }
     }
+
+    /// `defaultNode`: the value, typed after it.
+    pub fn default_of(value: Value) -> Self {
+        let ty = match value {
+            Value::Bool(_) => Some(Type::Boolean),
+            Value::Number(_) => Some(Type::Number),
+            Value::String(_) => Some(Type::String),
+            Value::Undefined | Value::Null => None,
+        };
+        Self {
+            ty,
+            ..Self::new(value)
+        }
+    }
+
+    /// `notApplicableNode`.
+    pub fn not_applicable() -> Self {
+        Self {
+            nullable: Some(true),
+            ..Self::new(Value::Null)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +150,9 @@ pub struct Replacement {
     pub blacklist: Vec<NodeId>,
     pub non_applicable: bool,
 }
+
+/// Replacements by replaced rule, in the order they are tried.
+pub type Replacements = FxHashMap<NameId, Vec<Replacement>>;
 
 impl Replacement {
     pub fn references(&self) -> impl Iterator<Item = NodeId> + '_ {
@@ -609,35 +634,64 @@ pub struct InferredType {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Names {
+struct NameTable {
     list: Vec<String>,
     ids: FxHashMap<String, NameId>,
 }
 
+/// Rule names, numbered in the order they are interned.
+#[derive(Debug, Default, Clone)]
+pub struct Names {
+    /// The names of the base rules, which copies of the engine share.
+    base: Rc<NameTable>,
+    /// The names interned since, numbered after the base ones.
+    added: NameTable,
+}
+
 impl Names {
     pub fn intern(&mut self, name: &str) -> NameId {
-        if let Some(&id) = self.ids.get(name) {
+        if let Some(id) = self.get(name) {
             return id;
         }
-        let id = NameId(self.list.len() as u32);
-        self.list.push(name.to_owned());
-        self.ids.insert(name.to_owned(), id);
+        let id = NameId((self.base.list.len() + self.added.list.len()) as u32);
+        self.added.list.push(name.to_owned());
+        self.added.ids.insert(name.to_owned(), id);
         id
     }
 
     pub fn get(&self, name: &str) -> Option<NameId> {
-        self.ids.get(name).copied()
+        self.base
+            .ids
+            .get(name)
+            .or_else(|| self.added.ids.get(name))
+            .copied()
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = NameId> + use<> {
+        (0..(self.base.list.len() + self.added.list.len()) as u32).map(NameId)
     }
 
     pub fn name(&self, id: NameId) -> &str {
-        &self.list[id.0 as usize]
+        let index = id.0 as usize;
+        match self.base.list.get(index) {
+            Some(name) => name,
+            None => &self.added.list[index - self.base.list.len()],
+        }
+    }
+
+    /// Makes the names so far the base ones, once the base rules are loaded.
+    fn freeze(&mut self) {
+        self.base = Rc::new(std::mem::take(&mut self.added));
     }
 }
 
 /// Every node, name and rule definition of an engine.
 #[derive(Clone)]
 pub struct Program {
-    pub nodes: Vec<Node>,
+    /// The nodes of the base rules, which copies of the engine share.
+    base_nodes: Rc<Vec<Node>>,
+    /// The nodes added since, numbered after the base ones.
+    nodes: Vec<Node>,
     /// Inferred types, set for the nodes type inference visited.
     pub types: Vec<Option<InferredType>>,
     pub names: Names,
@@ -645,8 +699,9 @@ pub struct Program {
     base_rules: Vec<Option<NodeId>>,
     /// Rules defined by the current situation and evaluations, shadowing the base ones.
     overlay: FxHashMap<NameId, NodeId>,
-    /// Replacements of the base rules, by replaced rule.
-    pub replacements: FxHashMap<NameId, Vec<Replacement>>,
+    pub replacements: Replacements,
+    /// The replacements of the base rules, while overlay rules add some.
+    base_replacements: Option<Replacements>,
     /// The node each set of applicable replacements turns a reference into, shared by every
     /// reference it applies to.
     pub replacement_nodes: FxHashMap<Vec<u32>, NodeId>,
@@ -665,12 +720,14 @@ pub struct Program {
 impl Program {
     pub fn new(options: Options, today: Today, unit_key: Option<UnitKey>) -> Self {
         Program {
+            base_nodes: Rc::default(),
             nodes: Vec::new(),
             types: Vec::new(),
             names: Names::default(),
             base_rules: Vec::new(),
             overlay: FxHashMap::default(),
             replacements: FxHashMap::default(),
+            base_replacements: None,
             replacement_nodes: FxHashMap::default(),
             next_replacement_id: 0,
             today,
@@ -682,10 +739,21 @@ impl Program {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.base_nodes.len() + self.nodes.len()
+    }
+
     pub fn push(&mut self, node: Node) -> NodeId {
-        let id = NodeId(self.nodes.len() as u32);
+        let id = NodeId(self.len() as u32);
         self.nodes.push(node);
         id
+    }
+
+    /// Makes the nodes and names so far the base ones, which copies of the engine share, once
+    /// the base rules are loaded.
+    pub fn freeze(&mut self) {
+        self.base_nodes = Rc::new(std::mem::take(&mut self.nodes));
+        self.names.freeze();
     }
 
     /// Pushes `node`, a copy of `original`, which keeps its source arguments.
@@ -698,11 +766,29 @@ impl Program {
     }
 
     pub fn node(&self, id: NodeId) -> &Node {
-        &self.nodes[id.0 as usize]
+        let index = id.0 as usize;
+        match self.base_nodes.get(index) {
+            Some(node) => node,
+            None => &self.nodes[index - self.base_nodes.len()],
+        }
     }
 
     pub fn node_mut(&mut self, id: NodeId) -> &mut Node {
-        &mut self.nodes[id.0 as usize]
+        let index = id.0 as usize;
+        let base = self.base_nodes.len();
+        if index < base {
+            &mut Rc::make_mut(&mut self.base_nodes)[index]
+        } else {
+            &mut self.nodes[index - base]
+        }
+    }
+
+    /// The rule `reference` points to, once resolved.
+    pub fn target(&self, reference: NodeId) -> Option<NameId> {
+        match self.node(reference) {
+            Node::Reference(reference) => reference.target,
+            _ => None,
+        }
     }
 
     pub fn rule_node(&self, name: NameId) -> Option<NodeId> {
@@ -768,14 +854,30 @@ impl Program {
         self.types.get(id.0 as usize).copied().flatten()
     }
 
-    /// Drops every node from `len` on, with the overlay rules.
+    /// Drops every node from `len` on, with the overlay rules and their replacements.
     pub fn reset_overlay(&mut self, len: usize) {
         self.truncate(len);
         self.overlay.clear();
+        if let Some(base) = self.base_replacements.take() {
+            self.replacements = base;
+        }
     }
 
+    pub fn set_replacements(&mut self, replacements: Replacements, overlay: bool) {
+        let previous = std::mem::replace(&mut self.replacements, replacements);
+        if overlay {
+            self.base_replacements.get_or_insert(previous);
+        }
+    }
+
+    /// Whether overlay rules replace other rules.
+    pub fn has_overlay_replacements(&self) -> bool {
+        self.base_replacements.is_some()
+    }
+
+    /// Drops every node from `len` on, `len` being at least the number of base nodes.
     pub fn truncate(&mut self, len: usize) {
-        self.nodes.truncate(len);
+        self.nodes.truncate(len - self.base_nodes.len());
         self.types.truncate(len);
         self.replacement_nodes
             .retain(|_, node| (node.0 as usize) < len);

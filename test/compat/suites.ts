@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import PublicodesEngine from "publicodes";
 import { parse, parseDocument } from "yaml";
 import Engine, { type RawPublicodes, type Situation } from "../../src/index.js";
-import { evaluateAll, type Outcomes } from "./outcome.js";
+import { evaluateAll, type Outcomes, recordingLogger } from "./outcome.js";
 
 /** A rule set with named situations, loaded from `suites/<name>.yaml`. */
 export interface Suite {
@@ -25,7 +25,6 @@ const PUBLICODES_PACKAGE = new URL(
   "../../node_modules/publicodes/package.json",
   import.meta.url,
 );
-const silent = { log() {}, warn() {}, error() {} };
 
 export async function loadSuites(): Promise<Suite[]> {
   const harnessHash = await hashHarness();
@@ -48,10 +47,10 @@ export async function loadSuites(): Promise<Suite[]> {
           () =>
             new PublicodesEngine(
               rules as ConstructorParameters<typeof PublicodesEngine>[0],
-              { logger: silent },
+              { logger: recordingLogger },
             ),
         ),
-        candidate: once(() => new Engine(rules, { logger: silent })),
+        candidate: once(() => new Engine(rules, { logger: recordingLogger })),
         cacheKey: hash(
           version,
           harnessHash,

@@ -1,6 +1,6 @@
 # 0006. API surface
 
-Status: accepted
+Status: superseded by 0009
 
 ## Context
 

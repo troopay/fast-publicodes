@@ -5,12 +5,15 @@ use std::rc::Rc;
 use serde_json::Value as Json;
 
 use crate::ast::NodeId;
+use crate::js::number_to_string;
 
 pub type Entries = Vec<(Rc<str>, Raw)>;
 
 /// Cloning shares the strings, lists and maps.
 #[derive(Debug, Clone)]
 pub enum Raw {
+    /// Given as the value of a rule or of the situation, or as the value to evaluate.
+    Undefined,
     Null,
     Bool(bool),
     Number(f64),
@@ -74,12 +77,30 @@ impl Raw {
     pub fn is_oui(&self) -> bool {
         self.as_str() == Some("oui")
     }
-}
 
-impl Raw {
+    /// `String(value)`, a parsed node being an object.
+    pub fn to_js_string(&self) -> String {
+        match self {
+            Raw::Undefined => "undefined".to_owned(),
+            Raw::Null => "null".to_owned(),
+            Raw::Bool(b) => b.to_string(),
+            Raw::Number(n) => number_to_string(*n),
+            Raw::String(s) => s.to_string(),
+            Raw::List(items) => items
+                .iter()
+                .map(|item| match item {
+                    Raw::Undefined | Raw::Null => String::new(),
+                    item => item.to_js_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            Raw::Map(_) | Raw::Node(_) => "[object Object]".to_owned(),
+        }
+    }
+
     pub fn to_json(&self) -> Json {
         match self {
-            Raw::Null | Raw::Node(_) => Json::Null,
+            Raw::Undefined | Raw::Null | Raw::Node(_) => Json::Null,
             Raw::Bool(b) => Json::Bool(*b),
             Raw::Number(n) => serde_json::Number::from_f64(*n).map_or(Json::Null, Json::Number),
             Raw::String(s) => Json::String(s.to_string()),
@@ -94,9 +115,22 @@ impl Raw {
     }
 }
 
+/// Reads JSON in which an object with the single key `"\u{0}"` stands for what JSON cannot
+/// write: `"undefined"`, `"NaN"`, `"Infinity"` or `"-Infinity"`.
 impl From<&Json> for Raw {
     fn from(value: &Json) -> Self {
         match value {
+            Json::Object(entries)
+                if entries.len() == 1
+                    && let Some(Json::String(special)) = entries.get("\u{0}") =>
+            {
+                match special.as_str() {
+                    "undefined" => Raw::Undefined,
+                    "Infinity" => Raw::Number(f64::INFINITY),
+                    "-Infinity" => Raw::Number(f64::NEG_INFINITY),
+                    _ => Raw::Number(f64::NAN),
+                }
+            }
             Json::Null => Raw::Null,
             Json::Bool(b) => Raw::Bool(*b),
             Json::Number(n) => Raw::Number(n.as_f64().unwrap_or(f64::NAN)),

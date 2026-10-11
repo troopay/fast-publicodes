@@ -1,5 +1,5 @@
 import type { Situation } from "../../src/index.js";
-import { diff, evaluateAll } from "./outcome.js";
+import { diff, evaluateAll, rulesOf } from "./outcome.js";
 import { cached, hash, type Suite } from "./suites.js";
 
 type Input =
@@ -78,8 +78,8 @@ export function shrink(
 ): Situation {
   const differs = (candidate: Situation) =>
     diff(
-      evaluateAll(suite.oracle(), candidate, [rule]),
-      evaluateAll(suite.candidate(), candidate, [rule]),
+      evaluateAll(suite.oracle(), candidate, rulesOf([rule])),
+      evaluateAll(suite.candidate(), candidate, rulesOf([rule])),
     ).length > 0;
   const shrunk = { ...situation };
   for (const key of Object.keys(situation)) {

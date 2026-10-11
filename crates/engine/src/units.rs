@@ -227,12 +227,17 @@ fn remove_once(list: &mut Vec<String>, element: &str, eq: impl Fn(&str, &str) ->
     }
 }
 
+/// Cancels the units found both as numerator and denominator, except the empty unit, which
+/// `publicodes` finds but reads as false.
 fn simplify(unit: &Unit, eq: impl Fn(&str, &str) -> bool + Copy) -> Unit {
     let mut result = unit.clone();
+    let found = |list: &[String], next: &str| {
+        list.iter()
+            .find(|u| eq(next, u))
+            .is_some_and(|u| !u.is_empty())
+    };
     for next in unit.numerators.iter().chain(&unit.denominators) {
-        if result.numerators.iter().any(|u| eq(next, u))
-            && result.denominators.iter().any(|u| eq(next, u))
-        {
+        if found(&result.numerators, next) && found(&result.denominators, next) {
             remove_once(&mut result.numerators, next, eq);
             remove_once(&mut result.denominators, next, eq);
         }

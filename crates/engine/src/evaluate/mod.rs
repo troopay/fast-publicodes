@@ -121,7 +121,7 @@ impl EvalState {
 
     /// `shallowCopy`: a sub-engine seeing the same rules, with a copy of this cache if
     /// `copy_cache`.
-    fn fork(&self, copy_cache: bool) -> EvalState {
+    pub fn fork(&self, copy_cache: bool) -> EvalState {
         EvalState {
             cache: if copy_cache {
                 self.cache.snapshot()
@@ -144,6 +144,15 @@ pub struct Evaluator<'a> {
 impl<'a> Evaluator<'a> {
     pub fn new(program: &'a Program, state: &'a mut EvalState) -> Self {
         Self { program, state }
+    }
+
+    /// An evaluation error naming the rule being evaluated.
+    pub fn error(&self, message: impl Into<String>) -> Error {
+        let error = Error::evaluation(message);
+        match self.state.rule_stack.last() {
+            Some(&rule) => error.in_rule(self.program.names.name(rule)),
+            None => error,
+        }
     }
 
     pub fn warn(&self, kind: WarningKind, message: String, cause: Option<Error>) {
@@ -238,7 +247,7 @@ impl<'a> Evaluator<'a> {
                     Value::Null | Value::Undefined => valeur.value,
                     Value::Number(n) => Value::Number(n.ln()),
                     other => {
-                        return Err(Error::evaluation(format!(
+                        return Err(self.error(format!(
                             "Impossible de calculer le logarithme de {}",
                             js_value::to_js_string(&other)
                         )));

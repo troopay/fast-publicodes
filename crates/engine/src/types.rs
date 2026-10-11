@@ -4,8 +4,8 @@ use crate::ast::{InferredType, Node, NodeId, Operator, PossibilityKind, Program,
 
 fn infer(program: &mut Program, id: NodeId) -> InferredType {
     let index = id.0 as usize;
-    if program.types.len() < program.nodes.len() {
-        program.types.resize(program.nodes.len(), None);
+    if program.types.len() < program.len() {
+        program.types.resize(program.len(), None);
     }
     if let Some(ty) = program.types[index] {
         return ty;

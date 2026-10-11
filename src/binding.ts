@@ -15,15 +15,16 @@ export interface NativeEngine {
     keepPrevious: boolean,
     strict: boolean,
   ): object;
-  evaluate(expression: string, json: boolean): object;
-  missingVariables(missing: unknown): object;
+  evaluate(text: string, json: boolean): object;
+  evaluations(): unknown;
+  missingVariables(evaluations: unknown, index: number): object;
   takeWarnings(): object;
   inversionFail(): boolean;
   resetCache(): void;
   shallowCopy(copyCache: boolean): NativeEngine;
   ruleNames(): string[];
   rule(name: string): object;
-  possibilities(name: string, filterNotApplicable: boolean): object;
+  applicablePossibilities(name: string): object;
 }
 
 let current: Binding | undefined;
@@ -38,3 +39,21 @@ export function binding(): Binding {
     throw new Error("fast-publicodes was loaded without its engine");
   return current;
 }
+
+/**
+ * `value` as JSON for the binding, writing what JSON cannot as `{ "\u0000": String(it) }`:
+ * non-finite numbers, and `undefined` as `value` or as one of its properties.
+ */
+export function toJson(value: unknown): string {
+  if (value === undefined) return UNDEFINED;
+  return JSON.stringify(value, function (this: unknown, _key, item) {
+    if (typeof item === "number" && !Number.isFinite(item)) {
+      return { "\u0000": String(item) };
+    }
+    return item === undefined && this === value
+      ? { "\u0000": "undefined" }
+      : item;
+  });
+}
+
+const UNDEFINED = JSON.stringify({ "\u0000": "undefined" });

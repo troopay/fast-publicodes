@@ -79,6 +79,120 @@ describe("errors", () => {
     compare(ruleSet, {}, () => null);
   });
 
+  test.each<[string, object]>([
+    ["null value", { a: { valeur: null } }],
+    ["boolean value", { a: true }],
+    ["list without mechanism", { a: { valeur: [1, 2] } }],
+    ["two mechanisms", { a: { somme: [1], produit: [2] } }],
+    ["unknown mechanism", { a: { inconnu: 1 } }],
+    ["somme of a string", { a: { somme: "b" }, b: 1 }],
+    ["operation with one operand", { a: { "+": [1] } }],
+    ["operation of a number", { a: { "+": 1 } }],
+    ["operation of null", { a: { "+": null } }],
+    [
+      "barème tranches not a list",
+      { a: { barème: { assiette: 1, tranches: 1 } } },
+    ],
+    ["variations not a list", { a: { variations: 1 } }],
+    ["unité not a string", { a: { valeur: 1, unité: 5 } }],
+    ["texte not a string", { a: { texte: 5 } }],
+    ["possibilities not a list", { a: { "une possibilité": "x" } }],
+    [
+      "possibilities in two units",
+      { a: { "une possibilité": ["1 €", "2 kg"] } },
+    ],
+    ["possibility not a constant", { a: { "une possibilité": ["1 + 2"] } }],
+    [
+      "deprecated possibilités",
+      {
+        a: {
+          "une possibilité": {
+            "choix obligatoire": "non",
+            possibilités: ["'x'", 1],
+          },
+        },
+      },
+    ],
+    [
+      "private rule",
+      { a: "x . p", x: 1, "x . p": { privé: "oui", valeur: 2 } },
+    ],
+    ["titre number", { a: { titre: 5, valeur: 1 } }],
+    ["titre boolean", { a: { titre: true, valeur: 1 } }],
+    [
+      "durée in an unknown unit",
+      { a: { durée: { depuis: "01/01/2020", unité: "kg" } } },
+    ],
+    [
+      "durée from a number",
+      { a: { durée: { depuis: 5, "jusqu'à": "01/01/2020" } } },
+    ],
+  ])("malformed rules: %s", (_, ruleSet) => {
+    compare(ruleSet as RawPublicodes, {}, (engine) => value(engine, "a"));
+  });
+
+  test.each<[string, object, string]>([
+    ["operation with three operands", { a: { "+": [1, 2, 3] } }, "a"],
+    ["titre list", { a: { titre: ["ab"], valeur: 1 } }, "a"],
+    [
+      "texte with a carriage return",
+      { a: 1, b: { texte: "x {{ a\r }} y" } },
+      "b",
+    ],
+    [
+      "arrondi to -0",
+      { a: { valeur: -0.2, arrondi: "oui" }, b: { texte: "{{ a }}" } },
+      "b",
+    ],
+    [
+      "date with a hexadecimal day",
+      { a: { durée: { depuis: "'0x1/01/2020'", "jusqu'à": "'01/03/2020'" } } },
+      "a",
+    ],
+    [
+      "empty units",
+      { a: { valeur: 1, unité: "€.2/mois.3" }, b: "a * 2 mois" },
+      "b",
+    ],
+    [
+      "dates with a fractional month",
+      { a: { durée: { depuis: "'0.5/2012'", "jusqu'à": "'29/28/2013'" } } },
+      "a",
+    ],
+    [
+      "dates with a negative month",
+      { a: { durée: { depuis: "'01/01/2030'", "jusqu'à": "'01/-1/2031'" } } },
+      "a",
+    ],
+  ])("odd rules: %s", (_, ruleSet, name) => {
+    compare(ruleSet as RawPublicodes, {}, (engine) => [
+      value(engine, name),
+      engine.getRule(name).title,
+    ]);
+  });
+
+  test.each<[string, object, (engine: AnyEngine) => unknown]>([
+    [
+      "undefined in the situation",
+      { a: { "par défaut": 1 } },
+      (engine) => value(engine.setSituation({ a: undefined } as never), "a"),
+    ],
+    [
+      "NaN in the situation",
+      { a: { "par défaut": 1 } },
+      (engine) => value(engine.setSituation({ a: Number.NaN }), "a"),
+    ],
+    ["undefined evaluated", {}, (engine) => value(engine, undefined as never)],
+    ["undefined rule", { a: undefined }, () => null],
+    [
+      "infinite values",
+      { a: { somme: [Number.POSITIVE_INFINITY, 1] } },
+      (engine) => value(engine, "a"),
+    ],
+  ])("values JSON cannot write: %s", (_, ruleSet, use) => {
+    compare(ruleSet as RawPublicodes, {}, use);
+  });
+
   test("unknown and private rules", () => {
     compare(contrat, {}, (engine) => engine.getRule("inconnue"));
     compare(contrat, {}, (engine) =>
@@ -120,6 +234,51 @@ describe("situation", () => {
     compare(contrat, { strict: { checkPossibleValues: true } }, (engine) =>
       engine.setSituation({ contrat: "'stage'" }).getSituation(),
     );
+  });
+
+  describe("replacements in added rules", () => {
+    const ruleSet = {
+      a: 1,
+      b: "a * 2",
+      c: { valeur: 10, contexte: { a: 100 } },
+      d: { question: "?" },
+      e: { "par défaut": 3 },
+      g: { valeur: 4, remplace: { "références à": "a", priorité: 2 } },
+    };
+    const values = (engine: AnyEngine) =>
+      ["b", "c", "d + a", "e"].map((name) => value(engine, name));
+    test.each<[string, (engine: AnyEngine) => unknown]>([
+      [
+        "situation",
+        (engine) => {
+          engine.setSituation({
+            e: { valeur: "d", remplace: { "références à": "a", priorité: 3 } },
+          } as never);
+          return values(engine);
+        },
+      ],
+      [
+        "situation kept, then dropped",
+        (engine) => {
+          engine.setSituation({
+            e: { valeur: 7, "rend non applicable": "g" },
+          } as never);
+          engine.setSituation({ d: 1 }, { keepPreviousSituation: true });
+          const kept = values(engine);
+          engine.setSituation({ d: 1 });
+          return [kept, values(engine)];
+        },
+      ],
+      [
+        "evaluate",
+        (engine) => [
+          value(engine, { valeur: 5, remplace: "g" } as never),
+          values(engine),
+        ],
+      ],
+    ])("%s", (_, use) => {
+      compare(ruleSet, {}, use);
+    });
   });
 });
 
@@ -265,6 +424,14 @@ describe("options", () => {
           ?.map((p) => p.publicodesValue),
       ],
     );
+  });
+
+  test("possibilities are those of the rule", () => {
+    compare({ a: { "une possibilité": ["'x'"] } }, {}, (engine) => [
+      engine.getPossibilitiesFor("a") ===
+        engine.getRule("a").possibilities?.explanation,
+      engine.getPossibilitiesFor("a")?.map((p) => p.publicodesValue),
+    ]);
   });
 });
 

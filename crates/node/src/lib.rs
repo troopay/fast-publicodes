@@ -1,6 +1,6 @@
-use fast_publicodes_engine::{Error as EngineError, Missing, Options, SituationOptions, Value};
+use fast_publicodes_engine::{Error as EngineError, Evaluations, Options, SituationOptions, Value};
 use fast_publicodes_js::{
-    SentWarning, Session, UnitKeyResult, error_json, parse_json, today, unit_key,
+    Sent, Session, UnitKeyResult, error_json, expression, failure_json, parse_json, today, unit_key,
 };
 use napi::bindgen_prelude::{Either, External, Function, JsObjectValue, Null, Object, Undefined};
 use napi::{Env, Error, Result};
@@ -59,7 +59,7 @@ pub struct NativeEngine {
 #[napi]
 impl NativeEngine {
     /// `get_today` gives the date `durée` defaults to, as `dd/mm/yyyy`. Fails with the error as
-    /// JSON `{ name, message, dottedName }`.
+    /// JSON `{ name, message, dottedName, warnings }`.
     #[napi(constructor)]
     pub fn new(
         env: &Env,
@@ -91,7 +91,7 @@ impl NativeEngine {
             today(move || get_today(())),
             unit_key,
         )
-        .map_err(|error| Error::from_reason(error_json(&error)))?;
+        .map_err(|failure| Error::from_reason(failure_json(&failure)))?;
         Ok(Self {
             session: Session::new(engine),
         })
@@ -132,20 +132,18 @@ impl NativeEngine {
         Ok(result)
     }
 
-    /// Returns `{ nodeValue, unit?, missing }`, where `missing` is a handle for
-    /// `missingVariables`, or `{ error }`. `expression` is JSON when `json`.
+    /// Returns `{ nodeValue, index }`, `index` locating it in `evaluations`, with `unit` the index
+    /// of its unit in the table the caller keeps, or `newUnit` when it is new and takes the next
+    /// index, after `unitsReset` asks the caller to empty its table; or `{ error }`. `text` is
+    /// JSON when `json`.
     #[napi]
     pub fn evaluate<'env>(
         &mut self,
         env: &'env Env,
-        expression: String,
-        json_expression: bool,
+        text: String,
+        json: bool,
     ) -> Result<Object<'env>> {
-        let value = if json_expression {
-            json(&expression)?
-        } else {
-            serde_json::Value::String(expression)
-        };
+        let value = expression(text, json).map_err(Error::from_reason)?;
         let evaluation = match self.session.engine.evaluate(&value) {
             Ok(evaluation) => evaluation,
             Err(error) => {
@@ -163,24 +161,43 @@ impl NativeEngine {
             Value::Number(n) => result.set_named_property("nodeValue", n)?,
             Value::String(s) => result.set_named_property("nodeValue", s.as_ref())?,
         }
+        result.set_named_property("index", evaluation.index)?;
         if let Some(unit) = evaluation.unit {
-            let mut js_unit = Object::new(env)?;
-            js_unit.set_named_property("numerators", unit.numerators)?;
-            js_unit.set_named_property("denominators", unit.denominators)?;
-            result.set_named_property("unit", js_unit)?;
+            let sent = self.session.send_unit(unit);
+            if sent.reset {
+                result.set_named_property("unitsReset", true)?;
+            }
+            match sent.unit {
+                Sent::Index(index) => result.set_named_property("unit", index)?,
+                Sent::New(unit) => {
+                    let mut js_unit = Object::new(env)?;
+                    js_unit.set_named_property("numerators", unit.numerators.clone())?;
+                    js_unit.set_named_property("denominators", unit.denominators.clone())?;
+                    result.set_named_property("newUnit", js_unit)?;
+                }
+            }
         }
-        result.set_named_property("missing", External::new(evaluation.missing))?;
         Ok(result)
     }
 
-    #[napi(ts_args_type = "missing: unknown")]
+    /// A handle on the expressions evaluated since the cache was last reset, for
+    /// `missingVariables`.
+    #[napi(ts_return_type = "unknown")]
+    pub fn evaluations(&self) -> External<Evaluations> {
+        External::new(self.session.engine.evaluations())
+    }
+
+    /// The missing variables of the evaluation at `index` in `evaluations`.
+    #[napi(ts_args_type = "evaluations: unknown, index: number")]
     pub fn missing_variables<'env>(
         &self,
         env: &'env Env,
-        missing: &External<Missing>,
+        evaluations: &External<Evaluations>,
+        index: u32,
     ) -> Result<Object<'env>> {
+        let missing = evaluations.missing(index).unwrap_or_default();
         let mut result = Object::new(env)?;
-        for (name, score) in self.session.engine.missing_variables(missing) {
+        for (name, score) in self.session.engine.missing_variables(&missing) {
             result.set_named_property(name, score)?;
         }
         Ok(result)
@@ -205,8 +222,8 @@ impl NativeEngine {
             .warnings
             .into_iter()
             .map(|warning| match warning {
-                SentWarning::Index(index) => Either::A(index),
-                SentWarning::Text(text) => Either::B(text),
+                Sent::Index(index) => Either::A(index),
+                Sent::New(text) => Either::B(text),
             })
             .collect();
         result.set_named_property("warnings", warnings)
@@ -254,17 +271,12 @@ impl NativeEngine {
 
     /// Returns `{ possibilities }`, as JSON, or `{ error }`.
     #[napi]
-    pub fn possibilities<'env>(
+    pub fn applicable_possibilities<'env>(
         &mut self,
         env: &'env Env,
         name: String,
-        filter_not_applicable: bool,
     ) -> Result<Object<'env>> {
-        let mut result = match self
-            .session
-            .engine
-            .possibilities(&name, filter_not_applicable)
-        {
+        let mut result = match self.session.engine.applicable_possibilities(&name) {
             Ok(possibilities) => {
                 let mut result = Object::new(env)?;
                 result.set_named_property("possibilities", possibilities.to_string())?;

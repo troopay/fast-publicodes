@@ -3,6 +3,9 @@
 mod rules;
 mod situation;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use rustc_hash::FxHashMap;
 use serde_json::Value as Json;
 
@@ -18,14 +21,40 @@ use crate::parse::{Parser, Templates};
 use crate::raw::Raw;
 use crate::replace::applicable_replacements;
 use crate::resolve::{disambiguate, finalize};
-use crate::units::{Unit, UnitKey};
+use crate::units::{UnitKey, UnitRef};
 
-/// The result of `evaluate`; `Engine::missing_variables` names its missing variables.
+/// The result of `evaluate`: its value and unit, and its index in `Engine::evaluations`.
 #[derive(Debug, Clone)]
 pub struct Evaluation {
     pub value: Value,
-    pub unit: Option<Unit>,
-    pub missing: Missing,
+    pub unit: Option<UnitRef>,
+    pub index: u32,
+}
+
+/// The expressions evaluated since the cache was reset, which stay readable after it is.
+#[derive(Clone, Default)]
+pub struct Evaluations(Rc<RefCell<EvaluationList>>);
+
+#[derive(Clone, Default)]
+struct EvaluationList {
+    evaluated: Vec<Evaluated>,
+    /// The index of each string expression evaluated.
+    strings: FxHashMap<String, u32>,
+}
+
+impl Evaluations {
+    pub fn missing(&self, index: u32) -> Option<Missing> {
+        let list = self.0.borrow();
+        list.evaluated
+            .get(index as usize)
+            .map(|evaluated| evaluated.missing.clone())
+    }
+
+    fn push(&self, evaluated: Evaluated) -> u32 {
+        let mut list = self.0.borrow_mut();
+        list.evaluated.push(evaluated);
+        list.evaluated.len() as u32 - 1
+    }
 }
 
 /// What an expression made of a single reference evaluates.
@@ -36,7 +65,6 @@ enum Reference {
     Replaced(NodeId),
 }
 
-#[derive(Clone)]
 pub struct Engine {
     program: Program,
     templates: Templates,
@@ -47,9 +75,34 @@ pub struct Engine {
     /// The names `getSituation` lists.
     public_situation: Vec<String>,
     state: EvalState,
-    expressions: FxHashMap<String, Evaluated>,
+    expressions: Evaluations,
     /// What each expression evaluated so far references directly, if anything.
     referenced_rules: FxHashMap<Box<str>, Option<Reference>>,
+}
+
+/// Why the rules could not be loaded, with the warnings raised before.
+#[derive(Debug)]
+pub struct Failure {
+    pub error: Error,
+    pub warnings: Vec<Warning>,
+}
+
+/// Parses, resolves and defines `rules`.
+fn load(program: &mut Program, rules: &Raw) -> Result<Templates> {
+    let templates = Templates::new(program)?;
+    let mut parser = Parser::new(program, &templates, "");
+    parser.parse_rules(rules)?;
+    let batch = parser.batch;
+    let order = batch
+        .rules
+        .iter()
+        .filter_map(|&(name, node)| node.map(|_| name))
+        .collect();
+    finalize(program, batch, false)?;
+    program.rule_order = order;
+    inherit_experimental(program);
+    program.freeze();
+    Ok(templates)
 }
 
 impl Engine {
@@ -58,34 +111,32 @@ impl Engine {
         options: Options,
         today: Today,
         unit_key: Option<UnitKey>,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, Failure> {
         if !rules.is_object() {
-            return Err(Error::new(
-                ErrorKind::Engine,
-                "Publicodes does not parse yaml rule sets itself anymore. Please provide a parsed js object. E.g. the `eemeli/yaml` package.",
-            ));
+            return Err(Failure {
+                error: Error::new(
+                    ErrorKind::Engine,
+                    "Publicodes does not parse yaml rule sets itself anymore. Please provide a parsed js object. E.g. the `eemeli/yaml` package.",
+                ),
+                warnings: Vec::new(),
+            });
         }
         let mut program = Program::new(options, today, unit_key);
-        let templates = Templates::new(&mut program)?;
-        let mut parser = Parser::new(&mut program, &templates, "");
-        parser.parse_rules(&Raw::from(rules))?;
-        let batch = parser.batch;
-        let order = batch
-            .rules
-            .iter()
-            .filter_map(|&(name, node)| node.map(|_| name))
-            .collect();
-        finalize(&mut program, batch, false)?;
-        program.rule_order = order;
-        inherit_experimental(&mut program);
+        let templates = match load(&mut program, &Raw::from(rules)) {
+            Ok(templates) => templates,
+            Err(error) => {
+                let warnings = std::mem::take(&mut *program.warnings.borrow_mut());
+                return Err(Failure { error, warnings });
+            }
+        };
         Ok(Self {
-            base_len: program.nodes.len(),
+            base_len: program.len(),
             program,
             templates,
             situation: Vec::new(),
             public_situation: Vec::new(),
             state: EvalState::default(),
-            expressions: FxHashMap::default(),
+            expressions: Evaluations::default(),
             referenced_rules: FxHashMap::default(),
         })
     }
@@ -93,18 +144,35 @@ impl Engine {
     /// `shallowCopy`: an engine with the same rules and situation, and this cache if
     /// `copy_cache`, but no inversion failure.
     pub fn shallow_copy(&self, copy_cache: bool) -> Engine {
-        let mut copy = self.clone();
+        let (mut state, expressions) = if copy_cache {
+            let list = self.expressions.0.borrow().clone();
+            (self.state.clone(), Evaluations(Rc::new(RefCell::new(list))))
+        } else {
+            (self.state.fork(false), Evaluations::default())
+        };
+        state.forget_inversion_fail();
+        let copy = Engine {
+            program: self.program.clone(),
+            templates: self.templates.clone(),
+            base_len: self.base_len,
+            situation: self.situation.clone(),
+            public_situation: self.public_situation.clone(),
+            state,
+            expressions,
+            referenced_rules: self.referenced_rules.clone(),
+        };
         copy.program.warnings.borrow_mut().clear();
-        copy.state.forget_inversion_fail();
-        if !copy_cache {
-            copy.reset_cache();
-        }
         copy
     }
 
     pub fn reset_cache(&mut self) {
         self.state.clear();
-        self.expressions.clear();
+        self.expressions = Evaluations::default();
+    }
+
+    /// The expressions evaluated since the cache was last reset.
+    pub fn evaluations(&self) -> Evaluations {
+        self.expressions.clone()
     }
 
     /// The warnings raised since the last call.
@@ -113,28 +181,41 @@ impl Engine {
     }
 
     /// Evaluates a publicodes expression: a string, a number, or an object written as a rule.
+    /// Strings evaluated since the cache was reset are not evaluated again.
     pub fn evaluate(&mut self, value: &Json) -> Result<Evaluation> {
-        let json_key;
-        let key = match value {
-            Json::String(expression) => expression.as_str(),
-            other => {
-                json_key = format!("\u{0}{other}");
-                json_key.as_str()
-            }
-        };
-        let evaluated = match self.expressions.get(key) {
-            Some(evaluated) => evaluated.clone(),
-            None => {
-                let evaluated = self.evaluate_value(value)?;
-                self.expressions.insert(key.to_owned(), evaluated.clone());
-                evaluated
-            }
-        };
+        let (evaluated, index) = self.evaluated(&Raw::from(value))?;
         Ok(Evaluation {
             value: evaluated.value,
-            unit: evaluated.unit.unit().cloned(),
-            missing: evaluated.missing,
+            unit: evaluated.unit.get().cloned(),
+            index,
         })
+    }
+
+    fn evaluated(&mut self, value: &Raw) -> Result<(Evaluated, u32)> {
+        let Raw::String(expression) = value else {
+            let evaluated = self.evaluate_value(value)?;
+            let index = self.expressions.push(evaluated.clone());
+            return Ok((evaluated, index));
+        };
+        let cached = self
+            .expressions
+            .0
+            .borrow()
+            .strings
+            .get(&**expression)
+            .copied();
+        if let Some(index) = cached {
+            let list = self.expressions.0.borrow();
+            return Ok((list.evaluated[index as usize].clone(), index));
+        }
+        let evaluated = self.evaluate_value(value)?;
+        let index = self.expressions.push(evaluated.clone());
+        self.expressions
+            .0
+            .borrow_mut()
+            .strings
+            .insert(expression.to_string(), index);
+        Ok((evaluated, index))
     }
 
     /// Whether an `inversion numérique` failed since the situation was set.
@@ -153,7 +234,7 @@ impl Engine {
     }
 
     fn load_overlay(&mut self, rules: &Raw) -> Result<()> {
-        let len = self.program.nodes.len();
+        let len = self.program.len();
         let mut parser = Parser::new(&mut self.program, &self.templates, "");
         parser.source_args = true;
         let parsed = parser.parse_rules(rules);
@@ -165,9 +246,9 @@ impl Engine {
         result
     }
 
-    fn evaluate_value(&mut self, value: &Json) -> Result<Evaluated> {
+    fn evaluate_value(&mut self, value: &Raw) -> Result<Evaluated> {
         let node = match value {
-            Json::String(expression) => self.referenced(expression),
+            Raw::String(expression) => self.referenced(expression),
             _ => None,
         };
         let node = match node {
@@ -182,7 +263,7 @@ impl Engine {
                 node
             }
             None => {
-                let rules = Raw::map([("[privé] $EVALUATION", Raw::from(value))]);
+                let rules = Raw::map([("[privé] $EVALUATION", value.clone())]);
                 self.load_overlay(&rules)?;
                 let name = self.program.names.intern("$EVALUATION");
                 let rule = self
@@ -201,6 +282,9 @@ impl Engine {
     }
 
     fn referenced(&mut self, expression: &str) -> Option<Reference> {
+        if self.program.has_overlay_replacements() {
+            return None;
+        }
         if let Some(reference) = self.referenced_rules.get(expression) {
             return *reference;
         }

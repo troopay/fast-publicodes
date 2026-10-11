@@ -94,7 +94,9 @@ impl Engine {
                     );
                     let error = Error::new(ErrorKind::Situation, message).in_rule(&name);
                     if self.program.options.strict.check_possible_values {
-                        self.restore_situation(previous);
+                        if !options.keep_previous {
+                            self.restore_situation(previous);
+                        }
                         self.public_situation = previous_public;
                         return Err(fail(error, false));
                     }
@@ -196,12 +198,7 @@ impl Engine {
     }
 
     fn evaluate_raw(&mut self, value: &Raw) -> Result<Evaluated> {
-        let evaluation = self.evaluate(&value.to_json())?;
-        Ok(Evaluated {
-            value: evaluation.value,
-            unit: crate::evaluate::UnitSlot::if_defined(evaluation.unit.map(std::rc::Rc::new)),
-            missing: evaluation.missing,
-        })
+        self.evaluated(value).map(|(evaluated, _)| evaluated)
     }
 
     fn warn_experimental_situation(&self) -> Result<()> {

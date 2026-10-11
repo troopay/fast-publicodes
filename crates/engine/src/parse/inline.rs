@@ -2,9 +2,9 @@
 
 use rustc_hash::FxHashMap;
 
-use super::{Parser, default_constant};
+use super::Parser;
 use crate::ast::{Constant, Node, NodeId, Program, SourceArgs, Value};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::raw::Raw;
 
 /// A template is parsed once; each use copies it with its arguments substituted.
@@ -110,12 +110,7 @@ const INLINE_CONTEXT: &str = "INLINE_MECANISM";
 
 impl Templates {
     pub fn new(program: &mut Program) -> Result<Self> {
-        let not_applicable = program.push(Node::Constant(Constant {
-            value: Value::Null,
-            ty: None,
-            nullable: Some(true),
-            unit: None,
-        }));
+        let not_applicable = program.push(Node::Constant(Constant::not_applicable()));
         let mut templates = Templates {
             not_applicable,
             templates: FxHashMap::default(),
@@ -181,7 +176,7 @@ impl Parser<'_> {
             | "toutes ces conditions"
             | "une de ces conditions"
             | "le maximum de"
-            | "le minimum de" => self.parse_list(value)?,
+            | "le minimum de" => self.parse_list(key, value)?,
             _ => return Ok(None),
         };
         let items: Vec<NodeId> = list
@@ -199,7 +194,7 @@ impl Parser<'_> {
                     "valeur",
                     product(
                         list,
-                        self.push(Node::Constant(default_constant(Value::Number(1.)))),
+                        self.push(Node::Constant(Constant::default_of(Value::Number(1.)))),
                     ),
                 ),
                 ("simplifier l'unité", s("oui")),
@@ -232,9 +227,18 @@ impl Parser<'_> {
         Ok(Some(node))
     }
 
-    fn parse_list(&mut self, value: &Raw) -> Result<Vec<Raw>> {
+    /// The items of the list mechanism `key`. Another value is parsed, then fails as its
+    /// body handles it.
+    fn parse_list(&mut self, key: &str, value: &Raw) -> Result<Vec<Raw>> {
         let Raw::List(items) = value else {
-            return Err(Error::syntax("Ce mécanisme attend une liste").in_rule(&self.context));
+            self.parse(value)?;
+            return Err(Error::new(
+                ErrorKind::Type,
+                match key {
+                    "somme" | "moyenne" | "produit" | "multiplication" => "valeur is not iterable",
+                    _ => "valeur.reduce is not a function",
+                },
+            ));
         };
         items
             .iter()

@@ -2,7 +2,7 @@
 
 use super::Parser;
 use crate::ast::{Node, NodeId, PossibilityKind, Type, Value};
-use crate::error::{Result, WarningKind};
+use crate::error::{Error, ErrorKind, Result, WarningKind};
 use std::rc::Rc;
 
 use crate::raw::{Entries, Raw};
@@ -53,29 +53,44 @@ impl Parser<'_> {
         let Some(mut list) = possibilities else {
             return Ok(None);
         };
+        if !list.is_truthy() {
+            return Ok(None);
+        }
+        if let Raw::String(_) | Raw::Number(_) | Raw::Bool(_) = list {
+            return Err(Error::new(
+                ErrorKind::Type,
+                format!(
+                    "Cannot use 'in' operator to search for 'possibilités' in {}",
+                    list.to_js_string()
+                ),
+            ));
+        }
         if let Some(inner) = list.get("possibilités") {
             let message = match list.get("choix obligatoire") {
                 Some(choice) if choice.is_truthy() => {
                     let names: Vec<String> = match inner {
                         Raw::List(items) => items
                             .iter()
-                            .map(|item| item.as_str().unwrap_or("[object Object]").to_owned())
+                            .map(|item| match item {
+                                Raw::Null => String::new(),
+                                item => item.to_js_string(),
+                            })
                             .collect(),
                         _ => Vec::new(),
                     };
                     let hint = if choice.as_str() == Some("non") {
                         format!(
-                            "Pour ajouter un choix « aucun », « non applicable » ou « autre » à la liste des possibilité, créer explicitement une règle dédiée. Par exemple : \n`une possibilité: [{}, aucun]`\n",
+                            "Pour ajouter un choix « aucun », « non applicable » ou « autre » à la liste des possibilité, créer explicitement une règle dédiée. Par exemple : \n\n`une possibilité: [{}, aucun]`\n",
                             names.join(", ")
                         )
                     } else {
                         String::new()
                     };
                     format!(
-                        "Les clés 'choix obligatoire' et 'possibilités' à l'intérieur de 'une possibilité' sont dépréciées. \nDéplacez les possibilités directement à la racine de 'une possibilité' .{hint}"
+                        "Les clés 'choix obligatoire' et 'possibilités' à l'intérieur de 'une possibilité' sont dépréciées. \n\nDéplacez les possibilités directement à la racine de 'une possibilité' .{hint}"
                     )
                 }
-                _ => "La clé 'possibilités' à l'intérieur de 'une possibilité' est dépréciée. \nDéplacez les possibilités directement à la racine de 'une possibilité'\n".to_owned(),
+                _ => "La clé 'possibilités' à l'intérieur de 'une possibilité' est dépréciée. \n\nDéplacez les possibilités directement à la racine de 'une possibilité'\n".to_owned(),
             };
             self.deprecated(message);
             list = inner.clone();
@@ -109,7 +124,7 @@ impl Parser<'_> {
                         .is_err()
                     {
                         return Err(self.syntax(format!(
-                            "Les possibilités doivent être toutes dans la même classe d'unité.\n{} n'est pas convertible en {}.",
+                            "Les possibilités doivent être toutes dans la même classe d'unité.\n\n\t\t\t\t\t{} n'est pas convertible en {}.",
                             serialize_unit(option.unit.as_deref()).unwrap_or_default(),
                             serialize_unit(reference_option.unit.as_deref()).unwrap_or_default()
                         )));
@@ -226,10 +241,10 @@ impl Parser<'_> {
                     publicodes_value,
                 })
             }
-            _ => {
-                Err(self
-                    .syntax("Les choix possibles doivent être des constantes ou des références."))
-            }
+            _ => Err(self.syntax(format!(
+                "\"{}\" n'est pas une constante ou une référence.\nLes choix possibles doivent être des constantes ou des références.",
+                possibility.to_js_string()
+            ))),
         }
     }
 }

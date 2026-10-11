@@ -18,11 +18,11 @@ mod units;
 
 pub use ast::Value;
 pub use date::Today;
-pub use engine::{Engine, Evaluation, SituationError, SituationOptions};
+pub use engine::{Engine, Evaluation, Evaluations, Failure, SituationError, SituationOptions};
 pub use error::{Error, ErrorKind, Warning, WarningKind};
 pub use evaluate::Missing;
 pub use options::Options;
-pub use units::{Unit, UnitKey};
+pub use units::{Unit, UnitKey, UnitRef};
 
 /// `parseExpression`: the expression as the objects `publicodes` builds.
 pub fn parse_expression(expression: &str, rule: &str) -> Result<serde_json::Value, Error> {

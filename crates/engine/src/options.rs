@@ -25,6 +25,8 @@ pub struct Options {
     pub warn: Warn,
     pub filter_not_applicable_possibilities: bool,
     pub automatic_namespace_disabling: bool,
+    /// The iterations of the root search of inversions and circular references, when set.
+    pub inversion_max_iterations: Option<f64>,
 }
 
 impl Default for Options {
@@ -45,60 +47,53 @@ impl Default for Options {
             },
             filter_not_applicable_possibilities: false,
             automatic_namespace_disabling: true,
+            inversion_max_iterations: None,
         }
     }
 }
 
-fn flag(options: &Json, key: &str) -> Option<bool> {
-    options.get(key).and_then(Json::as_bool)
-}
-
 impl Options {
-    /// Reads the options of the `publicodes` `Engine` constructor.
+    /// Reads options resolved as `publicodes` reads them: `strict`, `warn` and `flag` as
+    /// booleans, and `inversionMaxIterations`.
     pub fn from_json(options: &Json) -> Self {
-        let mut result = Options::default();
-        let strict = &mut result.strict;
-        match options.get("strict") {
-            Some(Json::Bool(all)) => {
-                strict.situation = *all;
-                strict.no_orphan_rule = flag(options, "allowOrphanRules") != Some(true) && *all;
-                strict.check_possible_values = *all;
-                strict.no_cycle_runtime = *all;
-            }
-            Some(object @ Json::Object(_)) => {
-                let read = |key, default| flag(object, key).unwrap_or(default);
-                strict.situation = read("situation", strict.situation);
-                strict.no_orphan_rule = read("noOrphanRule", strict.no_orphan_rule);
-                strict.no_cycle_runtime = read("noCycleRuntime", strict.no_cycle_runtime);
-                strict.check_possible_values =
-                    read("checkPossibleValues", strict.check_possible_values);
-            }
-            _ => {}
+        let defaults = Options::default();
+        let read = |section: &str, key: &str, default: bool| {
+            options
+                .get(section)
+                .and_then(|section| section.get(key))
+                .and_then(Json::as_bool)
+                .unwrap_or(default)
+        };
+        let (strict, warn) = (defaults.strict, defaults.warn);
+        Options {
+            strict: Strict {
+                situation: read("strict", "situation", strict.situation),
+                no_orphan_rule: read("strict", "noOrphanRule", strict.no_orphan_rule),
+                no_cycle_runtime: read("strict", "noCycleRuntime", strict.no_cycle_runtime),
+                check_possible_values: read(
+                    "strict",
+                    "checkPossibleValues",
+                    strict.check_possible_values,
+                ),
+            },
+            warn: Warn {
+                experimental_rules: read("warn", "experimentalRules", warn.experimental_rules),
+                unit_conversion: read("warn", "unitConversion", warn.unit_conversion),
+                cyclic_references: read("warn", "cyclicReferences", warn.cyclic_references),
+                deprecated_syntax: read("warn", "deprecatedSyntax", warn.deprecated_syntax),
+                situation_issues: read("warn", "situationIssues", warn.situation_issues),
+            },
+            filter_not_applicable_possibilities: read(
+                "flag",
+                "filterNotApplicablePossibilities",
+                defaults.filter_not_applicable_possibilities,
+            ),
+            automatic_namespace_disabling: read(
+                "flag",
+                "automaticNamespaceDisabling",
+                defaults.automatic_namespace_disabling,
+            ),
+            inversion_max_iterations: options.get("inversionMaxIterations").and_then(Json::as_f64),
         }
-        let warn = &mut result.warn;
-        match options.get("warn") {
-            Some(Json::Bool(all)) => {
-                warn.experimental_rules = *all;
-                warn.unit_conversion = *all;
-                warn.cyclic_references = *all;
-            }
-            Some(object @ Json::Object(_)) => {
-                let read = |key, default| flag(object, key).unwrap_or(default);
-                warn.experimental_rules = read("experimentalRules", warn.experimental_rules);
-                warn.unit_conversion = read("unitConversion", warn.unit_conversion);
-                warn.cyclic_references = read("cyclicReferences", warn.cyclic_references);
-                warn.deprecated_syntax = read("deprecatedSyntax", warn.deprecated_syntax);
-                warn.situation_issues = read("situationIssues", warn.situation_issues);
-            }
-            _ => {}
-        }
-        if let Some(flags) = options.get("flag") {
-            result.filter_not_applicable_possibilities =
-                flag(flags, "filterNotApplicablePossibilities")
-                    .unwrap_or(result.filter_not_applicable_possibilities);
-            result.automatic_namespace_disabling = flag(flags, "automaticNamespaceDisabling")
-                .unwrap_or(result.automatic_namespace_disabling);
-        }
-        result
     }
 }

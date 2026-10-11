@@ -107,7 +107,7 @@ impl Scope<'_> {
             ))
             .in_rule(rule)),
             Some(name) => Err(Error::syntax(format!(
-                "La règle \"{name}\" n'est pas accessible depuis \"{from}\".\nCela vient du fait qu'elle est privée ou qu'un de ses parent est privé"
+                "La règle \"{name}\" n'est pas accessible depuis \"{from}\".\n\tCela vient du fait qu'elle est privée ou qu'un de ses parent est privé"
             ))
             .in_rule(rule)),
         }
@@ -119,6 +119,8 @@ struct Resolver<'a> {
     batch: FxHashMap<NameId, NodeId>,
     /// `(rule, referenced rule)` for every reference resolved outside replacements.
     uses: Vec<(NameId, NameId)>,
+    /// The copy of each node resolved, so that a node used twice stays one node.
+    copies: FxHashMap<NodeId, NodeId>,
 }
 
 impl Resolver<'_> {
@@ -155,6 +157,7 @@ impl Resolver<'_> {
                 Ok(id)
             }
             Node::Constant(_) => Ok(id),
+            _ if let Some(&copy) = self.copies.get(&id) => Ok(copy),
             node => {
                 if let Node::Rule(rule) = node {
                     let references: Vec<NodeId> = rule
@@ -172,7 +175,9 @@ impl Resolver<'_> {
                     .map(|child| self.resolve(child))
                     .collect::<Result<Vec<_>>>()?;
                 let copy = self.program.node(id).with_children(resolved);
-                Ok(self.program.push_copy(id, copy))
+                let copy = self.program.push_copy(id, copy);
+                self.copies.insert(id, copy);
+                Ok(copy)
             }
         }
     }
@@ -205,6 +210,7 @@ pub fn disambiguate(program: &Program, from: &str, written: &str) -> Result<Name
 
 /// Resolves the rules of `batch`, defines them, and infers their types.
 pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()> {
+    let type_error = batch.type_error;
     let rules: Vec<(NameId, NodeId)> = batch
         .rules
         .into_iter()
@@ -214,6 +220,7 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
         batch: rules.iter().copied().collect(),
         program,
         uses: Vec::new(),
+        copies: FxHashMap::default(),
     };
     let mut resolved = Vec::with_capacity(rules.len());
     for &(name, draft) in &rules {
@@ -241,7 +248,13 @@ pub fn finalize(program: &mut Program, batch: Batch, overlay: bool) -> Result<()
         resolved.push((name, node));
     }
     let uses = std::mem::take(&mut resolver.uses);
-    inline_replacements(program, &mut resolved, &uses, overlay)?;
+    let replacements = inline_replacements(program, &mut resolved, &uses, overlay)?;
+    if let Some(error) = type_error {
+        return Err(error);
+    }
+    if let Some(replacements) = replacements {
+        program.set_replacements(replacements, overlay);
+    }
     for &(name, node) in &resolved {
         program.define(name, node, overlay);
     }

@@ -4,7 +4,7 @@ use super::js_value::{compare, power, strict_equals, to_js_string, to_number, tr
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Operator, Value};
 use crate::date::{is_date_string, timestamp};
-use crate::error::{Error, Result, WarningKind};
+use crate::error::{Result, WarningKind};
 use std::rc::Rc;
 
 use crate::units::{Unit, UnitOperator, UnitRef, infer_unit, is_percent, serialize_unit};
@@ -126,7 +126,7 @@ impl Evaluator<'_> {
         }
         let mut right = self.operand(right)?;
         if operator == Divide && is_zero(&right.value) {
-            return Err(Error::evaluation("Division by zero"));
+            return Err(self.error("Division by zero"));
         }
         if short_circuits(
             &right.value,

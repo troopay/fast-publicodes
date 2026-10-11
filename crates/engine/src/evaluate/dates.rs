@@ -4,7 +4,7 @@ use crate::date::{
     difference_in_civil_years, difference_in_days, difference_in_months,
     difference_in_trimestres_civils, difference_in_years,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::units::UnitRef;
 
 impl Evaluator<'_> {
@@ -34,7 +34,12 @@ impl Evaluator<'_> {
                     difference.max(0.)
                 })
             }
-            _ => return Err(Error::evaluation("Une durée se calcule entre deux dates")),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::Type,
+                    "dateString.split is not a function or its return value is not iterable",
+                ));
+            }
         };
         Ok(Evaluated {
             value,

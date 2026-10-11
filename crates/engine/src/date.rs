@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use crate::error::{Error, Result};
+use crate::js::string_to_number;
 
 /// Today as `dd/mm/yyyy`, asked each time a `durée` is parsed.
 pub type Today = Rc<dyn Fn() -> Result<String>>;
@@ -18,7 +19,8 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-fn civil_day_of(days: i64) -> i64 {
+/// The year and day of the month of a number of days since 1970-01-01.
+fn civil_from_days(days: i64) -> (i64, i64) {
     let days = days + 719_468;
     let era = days.div_euclid(146_097);
     let day_of_era = days - era * 146_097;
@@ -26,10 +28,16 @@ fn civil_day_of(days: i64) -> i64 {
         (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
-    day_of_year - (153 * month_index + 2) / 5 + 1
+    let year = year_of_era + era * 400 + i64::from(month_index >= 10);
+    (year, day_of_year - (153 * month_index + 2) / 5 + 1)
 }
 
-/// `new Date(year, month - 1, day)` as days since epoch, or `None` for NaN components.
+fn civil_day_of(days: i64) -> i64 {
+    civil_from_days(days).1
+}
+
+/// `new Date(year, month, day)` as days since epoch, `month` counted from 0, or `None` for an
+/// invalid date.
 fn js_local_date(year: f64, month: f64, day: f64) -> Option<i64> {
     if !(year.is_finite() && month.is_finite() && day.is_finite()) {
         return None;
@@ -44,17 +52,9 @@ fn js_local_date(year: f64, month: f64, day: f64) -> Option<i64> {
     } else {
         year
     };
-    let months = year * 12 + (month - 1);
+    let months = year * 12 + month;
     let first = days_from_civil(months.div_euclid(12), months.rem_euclid(12) + 1, 1);
     Some(first + day - 1)
-}
-
-fn js_unary_plus(text: &str) -> f64 {
-    let text = text.trim();
-    if text.is_empty() {
-        return 0.;
-    }
-    text.parse().unwrap_or(f64::NAN)
 }
 
 fn pad(n: f64) -> String {
@@ -62,11 +62,17 @@ fn pad(n: f64) -> String {
     if n < 10. { format!("0{text}") } else { text }
 }
 
-fn normalize_date(year: f64, month: f64, day: f64) -> Result<String> {
-    match js_local_date(year, month, day) {
-        Some(days) if civil_day_of(days) as f64 == day => {
-            Ok(format!("{}/{}/{}", pad(day), pad(month), pad(year)))
-        }
+/// The year, month and day `normalizeDateString` reads in `text`, once checked valid.
+fn valid_date(text: &str) -> Result<(f64, f64, f64)> {
+    let mut parts = text.split('/');
+    let mut part = || parts.next().map_or(f64::NAN, string_to_number);
+    let (first, second) = (part(), part());
+    let (year, month, day) = match text.split('/').nth(2).filter(|year| !year.is_empty()) {
+        Some(year) => (string_to_number(year), second, first),
+        None => (second, first, 1.),
+    };
+    match js_local_date(year, month - 1., day) {
+        Some(days) if civil_day_of(days) as f64 == day => Ok((year, month, day)),
         _ => Err(Error::syntax(format!(
             "La date {}/{}/{} n'est pas valide",
             crate::js::number_to_string(day),
@@ -76,26 +82,23 @@ fn normalize_date(year: f64, month: f64, day: f64) -> Result<String> {
     }
 }
 
+/// `normalizeDateString`: the date as `dd/mm/yyyy`, each part padded to two digits.
 pub fn normalize_date_string(text: &str) -> Result<String> {
-    let parts: Vec<&str> = text.split('/').collect();
-    let part = |i: usize| parts.get(i).map_or(f64::NAN, |p| js_unary_plus(p));
-    if parts.get(2).is_some_and(|year| !year.is_empty()) {
-        normalize_date(part(2), part(1), part(0))
-    } else {
-        normalize_date(part(1), part(0), 1.)
-    }
+    let (year, month, day) = valid_date(text)?;
+    Ok(format!("{}/{}/{}", pad(day), pad(month), pad(year)))
 }
 
 /// `convertToDate(value).getTime()`.
 pub fn timestamp(text: &str) -> Result<f64> {
-    let normalized = normalize_date_string(text)?;
-    let parts: Vec<f64> = normalized.split('/').map(js_unary_plus).collect();
-    let days = js_local_date(parts[2], parts[1], parts[0]).unwrap_or_default();
-    Ok(days as f64 * 86_400_000.)
+    let (year, month, day) = valid_date(text)?;
+    // Each part as read back from its padding, which writes a negative number `0-…`.
+    let padded = |n: f64| if n < 0. { f64::NAN } else { n };
+    let days = js_local_date(padded(year), padded(month) - 1., padded(day));
+    Ok(days.map_or(f64::NAN, |days| days as f64 * 86_400_000.))
 }
 
 fn parts(text: &str) -> Vec<f64> {
-    text.split('/').map(js_unary_plus).collect()
+    text.split('/').map(string_to_number).collect()
 }
 
 fn part(parts: &[f64], index: usize) -> f64 {
@@ -104,7 +107,7 @@ fn part(parts: &[f64], index: usize) -> f64 {
 
 /// `new Date(year, month, 0).getDate()`: the number of days of a month, 1-based.
 fn days_in_month(year: f64, month: f64) -> f64 {
-    js_local_date(year, month + 1., 0.).map_or(f64::NAN, |last| civil_day_of(last) as f64)
+    js_local_date(year, month, 0.).map_or(f64::NAN, |last| civil_day_of(last) as f64)
 }
 
 pub fn difference_in_days(from: &str, to: &str) -> Result<f64> {
@@ -128,13 +131,7 @@ fn is_leap_year(year: i64) -> bool {
 /// Year of a date and whether it is on or after the 1st of March.
 fn year_and_after_march(text: &str) -> Result<(i64, bool)> {
     let days = (timestamp(text)? / 86_400_000.) as i64;
-    let normalized = normalize_date_string(text)?;
-    let year = parts(&normalized)[2] as i64;
-    let year = if (0..=99).contains(&year) {
-        year + 1900
-    } else {
-        year
-    };
+    let (year, _) = civil_from_days(days);
     Ok((year, days >= days_from_civil(year, 3, 1)))
 }
 
@@ -187,7 +184,10 @@ pub fn difference_in_civil_years(from: &str, to: &str) -> Result<f64> {
             .into_iter()
             .rev()
             .collect();
-        format!("01/{}", crate::js::number_to_string(js_unary_plus(&tail)))
+        format!(
+            "01/{}",
+            crate::js::number_to_string(string_to_number(&tail))
+        )
     };
     Ok(difference_in_years(&year(from), &year(to))?.floor() + 1.)
 }

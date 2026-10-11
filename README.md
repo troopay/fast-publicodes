@@ -6,6 +6,7 @@ A drop-in replacement for [publicodes](https://publi.codes) 1.x: the same API an
 
 - **No AST.** `evaluate()` returns `nodeValue`, `unit` and `missingVariables` without `explanation`, and rules returned by `getRule()` and `getParsedRules()` carry their metadata without their node tree. `parsePublicodes`, `reduceAST`, `transformAST`, `traverseASTNode`, `utils.cyclicDependencies`, `utils.disambiguateReferenceNode` and `utils.updateReferencesMapsFromReferenceNode` are not provided, and `evaluate()` does not accept an AST node.
 - **No internal fields.** The members `publicodes` marks as internal (`context`, `baseContext`, `publicParsedRules`, `cache` and `evaluateNode`) do not exist.
+- **`undefined` inside rules.** A property of a rule set to `undefined` counts as absent, where `publicodes` reads some of them as an empty value.
 
 ## Requirements
 

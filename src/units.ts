@@ -45,7 +45,10 @@ export function parseUnit(
   };
 }
 
-/** Cancels the units found both as numerator and denominator. */
+/**
+ * Cancels the units found both as numerator and denominator, except the empty unit, which
+ * `publicodes` finds but reads as false.
+ */
 function simplify(unit: Unit, same: (a: string, b: string) => boolean): Unit {
   let { numerators, denominators } = unit;
   const removeOnce = (list: string[], item: string) => {
@@ -54,8 +57,8 @@ function simplify(unit: Unit, same: (a: string, b: string) => boolean): Unit {
   };
   for (const next of [...unit.numerators, ...unit.denominators]) {
     if (
-      numerators.some((u) => same(next, u)) &&
-      denominators.some((u) => same(next, u))
+      numerators.find((u) => same(next, u)) &&
+      denominators.find((u) => same(next, u))
     ) {
       numerators = removeOnce(numerators, next);
       denominators = removeOnce(denominators, next);

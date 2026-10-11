@@ -16,6 +16,7 @@ use crate::ast::{
 };
 use crate::error::{Error, ErrorKind, Result};
 use crate::expression::{number, parse_expression};
+use crate::js::is_js_whitespace;
 use crate::js::number_to_string;
 use crate::raw::{Entries, Raw};
 use crate::units::{parse_unit, parse_unit_with};
@@ -74,6 +75,8 @@ fn is_mechanism_key(key: &str) -> bool {
 pub struct Batch {
     pub rules: Vec<(crate::ast::NameId, Option<NodeId>)>,
     positions: FxHashMap<crate::ast::NameId, usize>,
+    /// The error `publicodes` raises when inferring the types of the rules.
+    pub type_error: Option<Error>,
 }
 
 impl Batch {
@@ -136,11 +139,11 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&mut self, raw: &Raw) -> Result<NodeId> {
         match raw {
-            Raw::Null => Err(self.syntax(
-                "Une des valeurs de la formule est vide.\nVérifiez que tous les champs à droite des deux points sont remplis",
+            Raw::Undefined | Raw::Null => Err(self.syntax(
+                "\n\tUne des valeurs de la formule est vide.\n\tVérifiez que tous les champs à droite des deux points sont remplis",
             )),
             Raw::Bool(_) => Err(self.syntax(
-                "Les valeurs booléennes true / false ne sont acceptées.\nUtilisez leur contrepartie française : 'oui' / 'non'",
+                "\nLes valeurs booléennes true / false ne sont acceptées.\nUtilisez leur contrepartie française : 'oui' / 'non'",
             )),
             Raw::Number(value) => self.parse_chained(&number(*value)),
             Raw::String(text) => {
@@ -167,11 +170,15 @@ impl<'a> Parser<'a> {
         }
         match raw {
             Raw::List(items) => Err(self.syntax(format!(
-                "Il manque le nom du mécanisme pour le tableau : [{}]",
-                items.len()
+                "\nIl manque le nom du mécanisme pour le tableau : [{}]\nLes mécanisme possibles sont : 'somme', 'le maximum de', 'le minimum de', 'toutes ces conditions', 'une de ces conditions'.\n\t\t",
+                items
+                    .iter()
+                    .map(|item| format!("'{}'", item.to_js_string()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))),
             Raw::Map(entries) if entries.len() > 1 => Err(self.syntax(format!(
-                "Les mécanismes suivants se situent au même niveau : {}",
+                "\nLes mécanismes suivants se situent au même niveau : {}\nCela vient probablement d'une erreur dans l'indentation\n\t",
                 entries
                     .iter()
                     .map(|(k, _)| format!("'{k}'"))
@@ -208,11 +215,10 @@ impl<'a> Parser<'a> {
             }
             "unité" => {
                 let valeur = self.parse_field(value, "valeur")?;
-                let text = value.get("unité").and_then(Raw::as_str).ok_or_else(|| {
-                    self.syntax(
-                        "➡️ Dans le mécanisme unité\nL'unité doit être une chaîne de caractères",
-                    )
-                })?;
+                let text = match value.get("unité") {
+                    Some(Raw::String(text)) => text,
+                    other => return Err(not_a_string(other, "string2", "includes")),
+                };
                 let unit = parse_unit_with(text, self.program.unit_key.as_ref())?;
                 Ok(self.push(Node::Unite {
                     unit: Rc::new(unit),
@@ -284,19 +290,28 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses every operand; the operation reads the first two.
     fn parse_operation(&mut self, operator: Operator, value: &Raw) -> Result<NodeId> {
-        let Raw::List(items) = value else {
-            return Err(self.syntax("Une opération attend une liste de deux valeurs"));
+        let items = match value {
+            Raw::List(items) => items,
+            Raw::Null => return Err(type_error("Cannot read properties of null (reading 'map')")),
+            _ => return Err(type_error("v.map is not a function")),
         };
-        let [left, right] = items.as_slice() else {
-            return Err(self.syntax("Une opération attend une liste de deux valeurs"));
+        let operands = items
+            .iter()
+            .map(|item| self.parse(item))
+            .collect::<Result<Vec<_>>>()?;
+        let operands = match operands[..] {
+            [left, right, ..] => [left, right],
+            _ => {
+                self.batch.type_error.get_or_insert_with(|| {
+                    type_error("Cannot read properties of undefined (reading 'nodeKind')")
+                });
+                let undefined = self.push(Node::Constant(Constant::new(Value::Undefined)));
+                [undefined, undefined]
+            }
         };
-        let left = self.parse(left)?;
-        let right = self.parse(right)?;
-        Ok(self.push(Node::Operation {
-            operator,
-            operands: [left, right],
-        }))
+        Ok(self.push(Node::Operation { operator, operands }))
     }
 
     fn parse_duree(&mut self, value: &Raw) -> Result<NodeId> {
@@ -304,7 +319,7 @@ impl<'a> Parser<'a> {
             Some(raw) if !matches!(raw, Raw::Null) => self.parse(raw),
             _ => {
                 let today = (self.program.today)()?;
-                Ok(self.push(Node::Constant(default_constant(Value::String(
+                Ok(self.push(Node::Constant(Constant::default_of(Value::String(
                     today.into(),
                 )))))
             }
@@ -328,8 +343,9 @@ impl<'a> Parser<'a> {
             || !UNITS.contains(&unit.numerators[0].as_str())
         {
             return Err(self.syntax(format!(
-                "Seules les unités suivantes sont acceptées pour une durée : {}.",
-                UNITS.join(", ")
+                "Seules les unités suivantes sont acceptées pour une durée : {}.\n\tL'unité fournie est: {}",
+                UNITS.join(", "),
+                unit.numerators.first().map_or("undefined", String::as_str)
             )));
         }
         Ok(self.push(Node::Duree {
@@ -339,21 +355,38 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// `texte`: literal text with `{{ expression }}` interpolations.
+    /// `texte`: literal text with `{{ expression }}` interpolations, matched as
+    /// `/{{(.|\n)*?}}/g`.
     fn parse_texte(&mut self, value: &Raw) -> Result<NodeId> {
-        let text = value.as_str().unwrap_or("");
+        let Raw::String(text) = value else {
+            return Err(Error::new(
+                ErrorKind::Type,
+                match value {
+                    Raw::Null => "Cannot read properties of null (reading 'matchAll')",
+                    _ => "texte.matchAll is not a function or its return value is not iterable",
+                },
+            ));
+        };
         let mut parts = Vec::new();
-        let mut rest = text;
-        while let Some(start) = rest.find("{{") {
-            let Some(length) = rest[start + 2..].find("}}") else {
-                break;
+        let mut literal = 0;
+        let mut search = 0;
+        while let Some(found) = text[search..].find("{{") {
+            let start = search + found;
+            let inner = &text[start + 2..];
+            let end = inner
+                .find("}}")
+                .filter(|&end| !inner[..end].contains(['\r', '\u{2028}', '\u{2029}']));
+            let Some(end) = end else {
+                search = start + 1;
+                continue;
             };
-            let expression = rest[start + 2..start + 2 + length].trim();
-            parts.push(TextPart::Text(rest[..start].to_owned()));
+            parts.push(TextPart::Text(text[literal..start].to_owned()));
+            let expression = inner[..end].trim_matches(is_js_whitespace);
             parts.push(TextPart::Node(self.parse(&Raw::str(expression))?));
-            rest = &rest[start + 4 + length..];
+            literal = start + 2 + end + 2;
+            search = literal;
         }
-        parts.push(TextPart::Text(rest.to_owned()));
+        parts.push(TextPart::Text(text[literal..].to_owned()));
         Ok(self.push(Node::Texte(parts)))
     }
 
@@ -361,10 +394,11 @@ impl<'a> Parser<'a> {
         let assiette = self.parse_field(value, "assiette")?;
         let multiplicateur = match value.get("multiplicateur") {
             Some(raw) if raw.is_truthy() => self.parse(raw)?,
-            _ => self.push(Node::Constant(default_constant(Value::Number(1.)))),
+            _ => self.push(Node::Constant(Constant::default_of(Value::Number(1.)))),
         };
-        let Some(Raw::List(items)) = value.get("tranches") else {
-            return Err(self.syntax("Les tranches doivent être une liste"));
+        let items = match value.get("tranches") {
+            Some(Raw::List(items)) => items,
+            other => return Err(not_a_list(other, "tranches")),
         };
         let mut tranches = Vec::with_capacity(items.len());
         for item in items.iter() {
@@ -395,14 +429,14 @@ impl<'a> Parser<'a> {
 
     fn parse_variations(&mut self, value: &Raw) -> Result<NodeId> {
         let Raw::List(items) = value else {
-            return Err(self.syntax("Le mécanisme variations attend une liste"));
+            return Err(not_a_list(Some(value), "v"));
         };
         let mut branches = Vec::with_capacity(items.len());
         for item in items.iter() {
             branches.push(match item.get("sinon") {
                 Some(sinon) => Branch {
                     consequence: self.parse(sinon)?,
-                    condition: self.push(Node::Constant(default_constant(Value::Bool(true)))),
+                    condition: self.push(Node::Constant(Constant::default_of(Value::Bool(true)))),
                 },
                 None => {
                     let consequence = self.parse_field(item, "alors")?;
@@ -475,9 +509,10 @@ impl<'a> Parser<'a> {
                 Raw::Number(n) => Raw::map([("valeur", Raw::str(&number_to_string(*n)))]),
                 Raw::Map(_) => value.clone(),
                 Raw::Null | Raw::List(_) => Raw::Map(Rc::default()),
-                Raw::Bool(_) | Raw::Node(_) => {
+                Raw::Undefined | Raw::Bool(_) | Raw::Node(_) => {
                     return Err(Error::syntax(format!(
-                        "Rule {name} is incorrectly written. Please give it a proper value."
+                        "Rule {name} is incorrectly written. Please give it a proper value.\n {}",
+                        value.to_js_string()
                     ))
                     .in_rule(&**name));
                 }
@@ -521,6 +556,8 @@ impl<'a> Parser<'a> {
         private: bool,
         raw: &Raw,
     ) -> Result<NodeId> {
+        let leaf = dotted_name.rsplit(" . ").next().unwrap_or("");
+        let title = title(raw.get("titre"), leaf)?;
         let mut avec: Entries = match raw.get("avec") {
             Some(Raw::Map(entries)) => entries.as_ref().clone(),
             _ => Vec::new(),
@@ -627,15 +664,51 @@ impl<'a> Parser<'a> {
             is_situation,
             names_evaluation: !is_situation && !dotted_name.contains("$INTERNAL"),
             situation,
-            title: capitalise0(&match raw.get("titre") {
-                Some(titre) if !matches!(titre, Raw::Null) => {
-                    crate::evaluate::to_js_string(&raw_value(titre))
-                }
-                _ => dotted_name.rsplit(" . ").next().unwrap_or("").to_owned(),
-            }),
+            title,
             experimental: raw.get("experimental").is_some_and(Raw::is_oui),
             raw: raw.clone(),
         }))))
+    }
+}
+
+fn type_error(message: &str) -> Error {
+    Error::new(ErrorKind::Type, message)
+}
+
+/// The `TypeError` JavaScript raises calling `variable.method` on `value`, which is not a string.
+fn not_a_string(value: Option<&Raw>, variable: &str, method: &str) -> Error {
+    type_error(&match value {
+        Some(Raw::Null) => format!("Cannot read properties of null (reading '{method}')"),
+        None => format!("Cannot read properties of undefined (reading '{method}')"),
+        Some(_) => format!("{variable}.{method} is not a function"),
+    })
+}
+
+/// The `TypeError` JavaScript raises calling `variable.map` on `value`, which is not a list.
+fn not_a_list(value: Option<&Raw>, variable: &str) -> Error {
+    not_a_string(value, variable, "map")
+}
+
+/// `capitalise0(titre ?? name)`.
+fn title(titre: Option<&Raw>, name: &str) -> Result<String> {
+    let reading = |of: &str| {
+        type_error(&format!(
+            "Cannot read properties of {of} (reading 'toUpperCase')"
+        ))
+    };
+    match titre {
+        None | Some(Raw::Null) => Ok(capitalise0(name)),
+        Some(Raw::String(text)) => Ok(capitalise0(text)),
+        Some(Raw::List(items)) => match items.first() {
+            Some(Raw::String(first)) => {
+                Ok(first.to_uppercase() + &Raw::list(items[1..].to_vec()).to_js_string())
+            }
+            Some(Raw::Null) => Err(reading("null")),
+            None => Err(reading("undefined")),
+            Some(_) => Err(type_error("name[0].toUpperCase is not a function")),
+        },
+        Some(other) if !other.is_truthy() => Ok(other.to_js_string()),
+        Some(_) => Err(reading("undefined")),
     }
 }
 
@@ -648,36 +721,9 @@ pub fn capitalise0(text: &str) -> String {
     }
 }
 
-/// A raw scalar as the value it denotes.
-fn raw_value(raw: &Raw) -> Value {
-    match raw {
-        Raw::String(text) => Value::String(text.clone()),
-        Raw::Number(n) => Value::Number(*n),
-        Raw::Bool(b) => Value::Bool(*b),
-        Raw::Null => Value::Null,
-        _ => Value::String("[object Object]".into()),
-    }
-}
-
 fn set_entry(entries: &mut Entries, key: &str, value: Raw) {
     match entries.iter_mut().find(|(k, _)| &**k == key) {
         Some((_, existing)) => *existing = value,
         None => entries.push((key.into(), value)),
-    }
-}
-
-/// `defaultNode(value)`.
-pub fn default_constant(value: Value) -> Constant {
-    let ty = match value {
-        Value::Bool(_) => Some(Type::Boolean),
-        Value::Number(_) => Some(Type::Number),
-        Value::String(_) => Some(Type::String),
-        Value::Undefined | Value::Null => None,
-    };
-    Constant {
-        value,
-        ty,
-        nullable: None,
-        unit: None,
     }
 }

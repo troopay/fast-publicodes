@@ -76,15 +76,20 @@ describe("utils", () => {
 });
 
 describe("units", () => {
-  test.each(["€/mois", "kg.m/s2", "%", "€/an/personne", "", "jour ouvré"])(
-    "%j",
-    (unit) => {
-      same((module) => {
-        const parsedUnit = module.parseUnit(unit);
-        return [parsedUnit, module.serializeUnit(parsedUnit)];
-      });
-    },
-  );
+  test.each([
+    "€/mois",
+    "kg.m/s2",
+    "%",
+    "€/an/personne",
+    "",
+    "jour ouvré",
+    "€.2/mois.3",
+  ])("%j", (unit) => {
+    same((module) => {
+      const parsedUnit = module.parseUnit(unit);
+      return [parsedUnit, module.serializeUnit(parsedUnit)];
+    });
+  });
 });
 
 describe("evaluations", () => {
@@ -136,6 +141,10 @@ describe("formatValue", () => {
   });
 });
 
+test("capitalise0", () => {
+  same((module) => ["élan", "", "Déjà"].map((s) => module.capitalise0(s)));
+});
+
 describe("parseExpression", () => {
   test.each([
     "a + b * 2",
@@ -170,9 +179,5 @@ describe("parseExpression", () => {
       const expression = Array.from({ length }, pick).join("");
       same((module) => [expression, module.parseExpression(expression, "r")]);
     }
-  });
-
-  test("capitalise0", () => {
-    same((module) => ["élan", "", "Déjà"].map((s) => module.capitalise0(s)));
   });
 });

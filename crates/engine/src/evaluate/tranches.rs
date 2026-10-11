@@ -127,7 +127,7 @@ impl Evaluator<'_> {
                 && !plancher.is_nan()
                 && plafond_value.is_some_and(|p| p <= plancher)
             {
-                return Err(Error::evaluation(format!(
+                return Err(self.error(format!(
                     "Le plafond de la tranche n°{} a une valeur inférieure à celui de la tranche précédente",
                     i + 1
                 )));
@@ -158,10 +158,10 @@ impl Evaluator<'_> {
         let assiette = self.evaluate(assiette)?;
         let multiplicateur = self.evaluate(multiplicateur)?;
         if multiplicateur.value == Value::Number(0.) {
-            return Err(Error::evaluation(match mechanism {
-                TrancheMechanism::TauxProgressif => "Division by zero",
-                _ => "Le multiplicateur ne peut pas être nul",
-            }));
+            return Err(match mechanism {
+                TrancheMechanism::TauxProgressif => Error::evaluation("Division by zero"),
+                _ => self.error("Le multiplicateur ne peut pas être nul"),
+            });
         }
         match mechanism {
             TrancheMechanism::Bareme => self.bareme(tranches, assiette, multiplicateur),

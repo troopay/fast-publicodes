@@ -1,10 +1,23 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ast::NameId;
 
-/// Missing variables with their scores, sorted by name.
+/// Missing variables with their scores, in the order a JavaScript object built the same way
+/// lists its keys.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Missing(Option<Rc<[(NameId, f64)]>>);
+
+#[derive(Default)]
+struct Scratch {
+    /// For each name, one more than its position in `merged`, or 0.
+    positions: Vec<u32>,
+    merged: Vec<(NameId, f64)>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::default();
+}
 
 impl Missing {
     pub fn single(name: NameId, score: f64) -> Self {
@@ -19,35 +32,33 @@ impl Missing {
         self.0.iter().flat_map(|entries| entries.iter())
     }
 
-    /// Sums the scores of both.
+    /// `mergeMissing`: the entries of `self`, then those of `other` it lacks, scores summed.
     pub fn merge(&self, other: &Missing) -> Missing {
         match (&self.0, &other.0) {
             (_, None) => self.clone(),
             (None, _) => other.clone(),
-            (Some(a), Some(b)) => {
-                let mut merged = Vec::with_capacity(a.len() + b.len());
-                let (mut i, mut j) = (0, 0);
-                while i < a.len() && j < b.len() {
-                    match a[i].0.cmp(&b[j].0) {
-                        std::cmp::Ordering::Less => {
-                            merged.push(a[i]);
-                            i += 1;
+            (Some(a), Some(b)) => SCRATCH.with(|scratch| {
+                let Scratch { positions, merged } = &mut *scratch.borrow_mut();
+                merged.clear();
+                merged.extend_from_slice(a);
+                for (index, &(name, _)) in a.iter().enumerate() {
+                    *position(positions, name) = index as u32 + 1;
+                }
+                for &(name, score) in b.iter() {
+                    let slot = position(positions, name);
+                    match *slot {
+                        0 => {
+                            merged.push((name, score));
+                            *slot = merged.len() as u32;
                         }
-                        std::cmp::Ordering::Greater => {
-                            merged.push(b[j]);
-                            j += 1;
-                        }
-                        std::cmp::Ordering::Equal => {
-                            merged.push((a[i].0, a[i].1 + b[j].1));
-                            i += 1;
-                            j += 1;
-                        }
+                        index => merged[index as usize - 1].1 += score,
                     }
                 }
-                merged.extend_from_slice(&a[i..]);
-                merged.extend_from_slice(&b[j..]);
-                Missing(Some(Rc::from(merged)))
-            }
+                for &(name, _) in merged.iter() {
+                    *position(positions, name) = 0;
+                }
+                Missing(Some(Rc::from(&merged[..])))
+            }),
         }
     }
 
@@ -86,10 +97,18 @@ impl Missing {
     /// `missing[name] = score`.
     pub fn with(&self, name: NameId, score: f64) -> Missing {
         let mut entries: Vec<(NameId, f64)> = self.iter().copied().collect();
-        match entries.binary_search_by(|(n, _)| n.cmp(&name)) {
-            Ok(index) => entries[index].1 = score,
-            Err(index) => entries.insert(index, (name, score)),
+        match entries.iter_mut().find(|(n, _)| *n == name) {
+            Some(entry) => entry.1 = score,
+            None => entries.push((name, score)),
         }
         Missing(Some(Rc::from(entries)))
     }
+}
+
+fn position(positions: &mut Vec<u32>, name: NameId) -> &mut u32 {
+    let index = name.0 as usize;
+    if index >= positions.len() {
+        positions.resize(index + 1, 0);
+    }
+    &mut positions[index]
 }

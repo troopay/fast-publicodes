@@ -1,10 +1,10 @@
 //! The engine for WebAssembly, with the interface of the Node addon.
 
 use fast_publicodes_engine::{
-    Engine, Error as EngineError, Missing, Options, SituationOptions, Value,
+    Engine, Error as EngineError, Evaluations, Options, SituationOptions, Value,
 };
 use fast_publicodes_js::{
-    SentWarning, Session, UnitKeyResult, error_json, parse_json, today, unit_key,
+    Sent, Session, UnitKeyResult, error_json, expression, failure_json, parse_json, today, unit_key,
 };
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -37,9 +37,9 @@ fn reason(thrown: JsValue) -> String {
         .unwrap_or_default()
 }
 
-/// The missing variables of an evaluation, for `missingVariables`.
+/// The expressions evaluated since the cache was last reset, for `missingVariables`.
 #[wasm_bindgen]
-pub struct MissingHandle(Missing);
+pub struct EvaluationsHandle(Evaluations);
 
 /// The engine, taking rules, options and situations as JSON.
 ///
@@ -54,7 +54,7 @@ pub struct WasmEngine {
 #[wasm_bindgen(js_class = Engine)]
 impl WasmEngine {
     /// `get_today` gives the date `durée` defaults to, as `dd/mm/yyyy`. Fails with the error as
-    /// JSON `{ name, message, dottedName }`.
+    /// JSON `{ name, message, dottedName, warnings }`.
     #[wasm_bindgen(constructor)]
     pub fn new(
         rules: &str,
@@ -86,7 +86,7 @@ impl WasmEngine {
                 .ok_or_else(|| "La date du jour n'est pas une chaîne".to_owned())
         });
         let engine = Engine::new(&json(rules)?, options, today, unit_key)
-            .map_err(|error| JsError::new(&error_json(&error)))?;
+            .map_err(|failure| JsError::new(&failure_json(&failure)))?;
         Ok(WasmEngine {
             session: Session::new(engine),
         })
@@ -126,14 +126,12 @@ impl WasmEngine {
         Ok(result)
     }
 
-    /// Returns `{ nodeValue, unit?, missing }`, where `missing` is a handle for
-    /// `missingVariables`, or `{ error }`. `expression` is JSON when `json_expression`.
-    pub fn evaluate(&mut self, expression: String, json_expression: bool) -> Result<Object> {
-        let value = if json_expression {
-            json(&expression)?
-        } else {
-            serde_json::Value::String(expression)
-        };
+    /// Returns `{ nodeValue, index }`, `index` locating it in `evaluations`, with `unit` the index
+    /// of its unit in the table the caller keeps, or `newUnit` when it is new and takes the next
+    /// index, after `unitsReset` asks the caller to empty its table; or `{ error }`. `text` is
+    /// JSON when `json`.
+    pub fn evaluate(&mut self, text: String, json: bool) -> Result<Object> {
+        let value = expression(text, json).map_err(|reason| JsError::new(&reason))?;
         let evaluation = match self.session.engine.evaluate(&value) {
             Ok(evaluation) => evaluation,
             Err(error) => {
@@ -152,20 +150,37 @@ impl WasmEngine {
             Value::String(s) => JsValue::from_str(&s),
         };
         set(&result, "nodeValue", node_value);
+        set(&result, "index", evaluation.index);
         if let Some(unit) = evaluation.unit {
-            let js_unit = Object::new();
-            set(&js_unit, "numerators", strings(unit.numerators));
-            set(&js_unit, "denominators", strings(unit.denominators));
-            set(&result, "unit", js_unit);
+            let sent = self.session.send_unit(unit);
+            if sent.reset {
+                set(&result, "unitsReset", true);
+            }
+            match sent.unit {
+                Sent::Index(index) => set(&result, "unit", index),
+                Sent::New(unit) => {
+                    let js_unit = Object::new();
+                    set(&js_unit, "numerators", strings(unit.numerators.clone()));
+                    set(&js_unit, "denominators", strings(unit.denominators.clone()));
+                    set(&result, "newUnit", js_unit);
+                }
+            }
         }
-        set(&result, "missing", MissingHandle(evaluation.missing));
         Ok(result)
     }
 
+    /// A handle on the expressions evaluated since the cache was last reset, for
+    /// `missingVariables`.
+    pub fn evaluations(&self) -> EvaluationsHandle {
+        EvaluationsHandle(self.session.engine.evaluations())
+    }
+
+    /// The missing variables of the evaluation at `index` in `evaluations`.
     #[wasm_bindgen(js_name = missingVariables)]
-    pub fn missing_variables(&self, missing: &MissingHandle) -> Object {
+    pub fn missing_variables(&self, evaluations: &EvaluationsHandle, index: u32) -> Object {
+        let missing = evaluations.0.missing(index).unwrap_or_default();
         let result = Object::new();
-        for (name, score) in self.session.engine.missing_variables(&missing.0) {
+        for (name, score) in self.session.engine.missing_variables(&missing) {
             set(&result, name, score);
         }
         result
@@ -190,8 +205,8 @@ impl WasmEngine {
             .warnings
             .into_iter()
             .map(|warning| match warning {
-                SentWarning::Index(index) => JsValue::from(index),
-                SentWarning::Text(text) => JsValue::from(text),
+                Sent::Index(index) => JsValue::from(index),
+                Sent::New(text) => JsValue::from(text),
             })
             .collect();
         set(result, "warnings", warnings);
@@ -237,12 +252,9 @@ impl WasmEngine {
     }
 
     /// Returns `{ possibilities }`, as JSON, or `{ error }`.
-    pub fn possibilities(&mut self, name: &str, filter_not_applicable: bool) -> Object {
-        let result = match self
-            .session
-            .engine
-            .possibilities(name, filter_not_applicable)
-        {
+    #[wasm_bindgen(js_name = applicablePossibilities)]
+    pub fn applicable_possibilities(&mut self, name: &str) -> Object {
+        let result = match self.session.engine.applicable_possibilities(name) {
             Ok(possibilities) => {
                 let result = Object::new();
                 set(&result, "possibilities", possibilities.to_string());

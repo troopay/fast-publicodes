@@ -1,6 +1,6 @@
 # Compatibility testing
 
-`test/compat` checks that fast-publicodes behaves like `publicodes`: for a given rule set and situation, every rule is evaluated by both engines, and their value, unit and missing variables must match. Errors match when both engines throw.
+`test/compat` checks that fast-publicodes behaves like `publicodes`: for a given rule set and situation, every rule is evaluated by both engines, and their value, unit, missing variables in order, warnings and errors (name and message) must match.
 
 `test/engine.test.ts` and `test/utils.test.ts` compare the rest of the API the same way, call by call: errors, warnings, options, rule metadata and helpers.
 
@@ -38,4 +38,4 @@ situations:
 
 Each failure lists the differing rules; errors raised only by fast-publicodes are counted by message, which ranks the mechanisms still to port.
 
-publicodes results are cached in `node_modules/.cache/compat`, keyed by publicodes version, harness code, rules and situation, so only the first run of a situation pays for publicodes.
+publicodes results are cached in `node_modules/.cache/compat`, keyed by publicodes version, harness code, date, rules and situation, so only the first run of a situation on a given day pays for publicodes.

@@ -9,13 +9,6 @@ fn situation_name(program: &mut Program, rule: NameId) -> NameId {
     program.names.intern(&name)
 }
 
-fn target(program: &Program, reference: NodeId) -> Option<NameId> {
-    match program.node(reference) {
-        Node::Reference(reference) => reference.target,
-        _ => None,
-    }
-}
-
 /// Copies the tree under `id`, sharing references and constants.
 fn copy_tree(program: &mut Program, id: NodeId) -> NodeId {
     match program.node(id).clone() {
@@ -59,7 +52,7 @@ pub fn prepare_sub_engines(
                 id: key,
             } => {
                 for pair in pairs.iter_mut().filter(|p| p.situation.is_none()) {
-                    let Some(origin) = target(program, pair.origin) else {
+                    let Some(origin) = program.target(pair.origin) else {
                         continue;
                     };
                     let name = situation_name(program, origin);
@@ -91,7 +84,7 @@ pub fn prepare_sub_engines(
                 created.push(input_rule);
                 let mut goal_rules = Vec::with_capacity(candidates.len());
                 for &candidate in &candidates {
-                    let goal = target(program, candidate).map(|goal| {
+                    let goal = program.target(candidate).map(|goal| {
                         let undefined = program.push(Node::Constant(Constant {
                             ty: Some(Type::Number),
                             nullable: Some(false),

@@ -6,7 +6,7 @@
 
 use crate::date::normalize_date_string;
 use crate::error::{Error, ErrorKind, Result};
-use crate::js::lone_high_surrogate;
+use crate::js::{is_js_whitespace, lone_high_surrogate};
 use crate::raw::Raw;
 
 fn is_space(c: char) -> bool {
@@ -21,11 +21,6 @@ fn is_space(c: char) -> bool {
                 | '\u{3000}'
                 | '\u{feff}'
     )
-}
-
-/// JavaScript `\s`, which `trim` also removes.
-fn is_js_whitespace(c: char) -> bool {
-    is_space(c) || matches!(c, '\n' | '\u{b}' | '\u{c}' | '\r')
 }
 
 /// Characters JavaScript `.` does not match.

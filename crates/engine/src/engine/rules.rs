@@ -84,9 +84,9 @@ impl Engine {
         }))
     }
 
-    /// `getPossibilitiesFor`.
-    pub fn possibilities(&mut self, name: &str, filter_not_applicable: bool) -> Result<Json> {
-        if filter_not_applicable && !self.program.options.filter_not_applicable_possibilities {
+    /// `getPossibilitiesFor` with `filterNotApplicable`.
+    pub fn applicable_possibilities(&mut self, name: &str) -> Result<Json> {
+        if !self.program.options.filter_not_applicable_possibilities {
             return Err(Error::new(
                 ErrorKind::Engine,
                 "You must enable `flag.filterNotApplicablePossibilities` in engine instantiation to use the filterNotApplicable option",
@@ -95,19 +95,15 @@ impl Engine {
         let Some(possibilities) = self.public_rule(name)?.possibilities else {
             return Ok(Json::Null);
         };
-        let not_applicable = if filter_not_applicable {
-            Some(self.evaluate_not_applicable(possibilities)?)
-        } else {
-            None
-        };
-        let mut options = match self.possibilities_json(possibilities, not_applicable.as_deref()) {
+        let not_applicable = self.evaluate_not_applicable(possibilities)?;
+        let mut options = match self.possibilities_json(possibilities, Some(&not_applicable)) {
             Json::Object(mut node) => node.remove("explanation").unwrap_or(Json::Null),
             _ => Json::Null,
         };
-        if let (Json::Array(items), Some(excluded)) = (&mut options, &not_applicable) {
+        if let Json::Array(items) = &mut options {
             let mut index = 0;
             items.retain(|_| {
-                let keep = !excluded[index];
+                let keep = !not_applicable[index];
                 index += 1;
                 keep
             });

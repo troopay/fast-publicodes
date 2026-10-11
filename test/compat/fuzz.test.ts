@@ -1,7 +1,7 @@
 import { describe, test } from "vitest";
 import { stringify } from "yaml";
 import { generate, inputsOf, shrink } from "./fuzz.js";
-import { diff, evaluateAll, report } from "./outcome.js";
+import { diff, evaluateAll, report, rulesOf } from "./outcome.js";
 import {
   expectedOutcomes,
   findSituation,
@@ -19,7 +19,7 @@ for (const suite of await loadSuites()) {
       test(`seed ${seed}`, { timeout: 60_000 }, async () => {
         const situation = generate(await inputsOf(suite), seed);
         const expected = await expectedOutcomes(suite, situation);
-        const names = Object.keys(expected);
+        const names = rulesOf(expected);
         const mismatches = diff(
           expected,
           evaluateAll(suite.candidate(), situation, names),
