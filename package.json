@@ -1,6 +1,6 @@
 {
   "name": "fast-publicodes",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A drop-in replacement for publicodes, with the engine written in Rust.",
   "license": "MIT",
   "repository": {
