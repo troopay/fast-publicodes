@@ -183,7 +183,29 @@ impl Engine {
     /// Evaluates a publicodes expression: a string, a number, or an object written as a rule.
     /// Strings evaluated since the cache was reset are not evaluated again.
     pub fn evaluate(&mut self, value: &Json) -> Result<Evaluation> {
-        let (evaluated, index) = self.evaluated(&Raw::from(value))?;
+        self.evaluation(&Raw::from(value))
+    }
+
+    /// `evaluate(getRule(rule).suggestions[name])`.
+    pub fn evaluate_suggestion(&mut self, rule: &str, name: &str) -> Result<Evaluation> {
+        let suggestion = self
+            .public_rule(rule)?
+            .1
+            .suggestions
+            .iter()
+            .find(|(n, _)| &**n == name)
+            .map(|&(_, node)| node)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Internal,
+                    format!("La règle {rule} n'a pas de suggestion {name}"),
+                )
+            })?;
+        self.evaluation(&Raw::map([("valeur", Raw::Node(suggestion))]))
+    }
+
+    fn evaluation(&mut self, value: &Raw) -> Result<Evaluation> {
+        let (evaluated, index) = self.evaluated(value)?;
         Ok(Evaluation {
             value: evaluated.value,
             unit: evaluated.unit.get().cloned(),
@@ -378,7 +400,7 @@ impl Engine {
             Node::Rule(rule) => rule
                 .suggestions
                 .iter()
-                .copied()
+                .map(|&(_, suggestion)| suggestion)
                 .chain(rule.possibilities)
                 .chain(rule.replacements.iter().flat_map(Replacement::references))
                 .chain(rule.parents.iter().copied())

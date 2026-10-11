@@ -27,7 +27,7 @@ situations:
 
 ## Tests
 
-- `regression.test.ts` runs every situation of every suite.
+- `regression.test.ts` runs every situation of every suite, compares the type both engines infer for each rule, and evaluates every rule suggestion in every situation.
 - `fuzz.test.ts` generates random situations from each suite's questions, one per seed. When a run fails, it shrinks the situation to the inputs the first differing rule needs and prints it.
 
 | Variable | Effect |

@@ -21,7 +21,7 @@ export interface Mismatch {
 
 interface EvaluatingEngine {
   setSituation(situation: Situation): unknown;
-  evaluate(expression: string): EvaluatedNode;
+  evaluate(expression: never): EvaluatedNode;
 }
 
 const RELATIVE_TOLERANCE = 1e-9;
@@ -56,6 +56,19 @@ export function evaluateAll(
   situation: Situation,
   names: string[],
 ): Outcomes {
+  return evaluateEach(
+    engine,
+    situation,
+    names.map((name) => [name, name]),
+  );
+}
+
+/** The outcome of each expression, by label, in `situation`. */
+export function evaluateEach(
+  engine: EvaluatingEngine,
+  situation: Situation,
+  expressions: [label: string, expression: unknown][],
+): Outcomes {
   recorded.length = 0;
   try {
     engine.setSituation(situation);
@@ -63,20 +76,25 @@ export function evaluateAll(
     const outcome = { error: messageOf(error) };
     return {
       [SITUATION]: withWarnings({ missingVariables: {} }),
-      ...Object.fromEntries(names.map((name) => [name, outcome])),
+      ...Object.fromEntries(expressions.map(([label]) => [label, outcome])),
     };
   }
   return {
     [SITUATION]: withWarnings({ missingVariables: {} }),
     ...Object.fromEntries(
-      names.map((name) => [name, withWarnings(evaluateOne(engine, name))]),
+      expressions.map(([label, expression]) => [
+        label,
+        withWarnings(evaluateOne(engine, expression)),
+      ]),
     ),
   };
 }
 
-function evaluateOne(engine: EvaluatingEngine, name: string): Outcome {
+function evaluateOne(engine: EvaluatingEngine, expression: unknown): Outcome {
   try {
-    const { nodeValue, unit, missingVariables } = engine.evaluate(name);
+    const { nodeValue, unit, missingVariables } = engine.evaluate(
+      expression as never,
+    );
     return {
       ...(nodeValue !== undefined && { nodeValue }),
       ...(unit && { unit: serializeUnit(unit) }),

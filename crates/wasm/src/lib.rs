@@ -1,7 +1,7 @@
 //! The engine for WebAssembly, with the interface of the Node addon.
 
 use fast_publicodes_engine::{
-    Engine, Error as EngineError, Evaluations, Options, SituationOptions, Value,
+    Engine, Error as EngineError, Evaluation, Evaluations, Options, SituationOptions, Value,
 };
 use fast_publicodes_js::{
     Sent, Session, UnitKeyResult, error_json, expression, failure_json, parse_json, today, unit_key,
@@ -132,12 +132,24 @@ impl WasmEngine {
     /// JSON when `json`.
     pub fn evaluate(&mut self, text: String, json: bool) -> Result<Object> {
         let value = expression(text, json).map_err(|reason| JsError::new(&reason))?;
-        let evaluation = match self.session.engine.evaluate(&value) {
+        let evaluation = self.session.engine.evaluate(&value);
+        Ok(self.evaluation(evaluation))
+    }
+
+    /// `evaluate`, for `getRule(rule).suggestions[name]`.
+    #[wasm_bindgen(js_name = evaluateSuggestion)]
+    pub fn evaluate_suggestion(&mut self, rule: &str, name: &str) -> Object {
+        let evaluation = self.session.engine.evaluate_suggestion(rule, name);
+        self.evaluation(evaluation)
+    }
+
+    fn evaluation(&mut self, evaluation: std::result::Result<Evaluation, EngineError>) -> Object {
+        let evaluation = match evaluation {
             Ok(evaluation) => evaluation,
             Err(error) => {
                 let result = failure(&error);
                 self.attach_warnings(&result);
-                return Ok(result);
+                return result;
             }
         };
         let result = Object::new();
@@ -166,7 +178,7 @@ impl WasmEngine {
                 }
             }
         }
-        Ok(result)
+        result
     }
 
     /// A handle on the expressions evaluated since the cache was last reset, for
@@ -239,7 +251,8 @@ impl WasmEngine {
             .collect()
     }
 
-    /// Returns `{ rule }`, the rule node as JSON, or `{ error }`.
+    /// Returns `{ rule }`, the rule node with its inferred type and the names of its suggestions,
+    /// as JSON, or `{ error }`.
     pub fn rule(&self, name: &str) -> Object {
         match self.session.engine.rule(name) {
             Ok(rule) => {

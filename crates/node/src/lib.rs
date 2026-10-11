@@ -1,4 +1,6 @@
-use fast_publicodes_engine::{Error as EngineError, Evaluations, Options, SituationOptions, Value};
+use fast_publicodes_engine::{
+    Error as EngineError, Evaluation, Evaluations, Options, SituationOptions, Value,
+};
 use fast_publicodes_js::{
     Sent, Session, UnitKeyResult, error_json, expression, failure_json, parse_json, today, unit_key,
 };
@@ -144,7 +146,28 @@ impl NativeEngine {
         json: bool,
     ) -> Result<Object<'env>> {
         let value = expression(text, json).map_err(Error::from_reason)?;
-        let evaluation = match self.session.engine.evaluate(&value) {
+        let evaluation = self.session.engine.evaluate(&value);
+        self.evaluation(env, evaluation)
+    }
+
+    /// `evaluate`, for `getRule(rule).suggestions[name]`.
+    #[napi]
+    pub fn evaluate_suggestion<'env>(
+        &mut self,
+        env: &'env Env,
+        rule: String,
+        name: String,
+    ) -> Result<Object<'env>> {
+        let evaluation = self.session.engine.evaluate_suggestion(&rule, &name);
+        self.evaluation(env, evaluation)
+    }
+
+    fn evaluation<'env>(
+        &mut self,
+        env: &'env Env,
+        evaluation: std::result::Result<Evaluation, EngineError>,
+    ) -> Result<Object<'env>> {
+        let evaluation = match evaluation {
             Ok(evaluation) => evaluation,
             Err(error) => {
                 let mut result = failure(env, &error)?;
@@ -256,7 +279,8 @@ impl NativeEngine {
             .collect()
     }
 
-    /// Returns `{ rule }`, the rule node as JSON, or `{ error }`.
+    /// Returns `{ rule }`, the rule node with its inferred type and the names of its suggestions,
+    /// as JSON, or `{ error }`.
     #[napi]
     pub fn rule<'env>(&self, env: &'env Env, name: String) -> Result<Object<'env>> {
         match self.session.engine.rule(&name) {

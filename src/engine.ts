@@ -9,6 +9,7 @@ import { resolveOptions } from "./options.js";
 import type {
   EngineOptions,
   EvaluatedNode,
+  InferedType,
   Logger,
   ParsedRules,
   Possibility,
@@ -16,6 +17,7 @@ import type {
   RawPublicodes,
   RuleNode,
   Situation,
+  Suggestion,
 } from "./types.js";
 import type { GetUnitKey, Unit } from "./units.js";
 
@@ -111,12 +113,19 @@ function createNative(
   }
 }
 
+/** The rule and name of each suggestion `getRule()` returns, which any engine evaluates. */
+const suggestionSources = new WeakMap<object, { rule: string; name: string }>();
+
 export class Engine<RuleNames extends string = string> {
   private native: NativeEngine;
   private logger: Logger;
   private publicSituation: Situation<RuleNames> = {};
   private parsedRules: ParsedRules<RuleNames> | undefined;
   private rules = new Map<string, RuleNode<RuleNames>>();
+  /** `nodesTypes` alone, for the rule nodes `getRule()` returns. */
+  context: { nodesTypes: WeakMap<RuleNode, InferedType> } = {
+    nodesTypes: new WeakMap(),
+  };
   private warningTexts: string[] = [];
   private unitKey: UnitKey | undefined;
   /** Results by evaluated value, until the cache is reset. */
@@ -206,9 +215,7 @@ export class Engine<RuleNames extends string = string> {
         {},
       );
     }
-    const json = typeof value !== "string";
-    const text = json ? toJson(value) : value;
-    const result = this.native.evaluate(text, json) as NativeEvaluation;
+    const result = this.evaluateNative(value);
     this.logWarnings(result);
     this.unitKey?.rethrow();
     const { nodeValue, index, ...nativeUnit } = unwrap(result);
@@ -233,14 +240,42 @@ export class Engine<RuleNames extends string = string> {
     return evaluation;
   }
 
+  private evaluateNative(value: PublicodesExpression): NativeEvaluation {
+    const suggestion =
+      typeof value === "object" ? suggestionSources.get(value) : undefined;
+    if (suggestion) {
+      return this.native.evaluateSuggestion(
+        suggestion.rule,
+        suggestion.name,
+      ) as NativeEvaluation;
+    }
+    const json = typeof value !== "string";
+    const text = json ? toJson(value) : value;
+    return this.native.evaluate(text, json) as NativeEvaluation;
+  }
+
   getRule(dottedName: RuleNames): RuleNode<RuleNames> {
     let rule = this.rules.get(dottedName);
     if (!rule) {
       const result = this.native.rule(dottedName) as NativeResult<{
         rule: string;
       }>;
-      rule = JSON.parse(unwrap(result).rule) as RuleNode<RuleNames>;
+      const { node, type, suggestions } = JSON.parse(unwrap(result).rule) as {
+        node: Omit<RuleNode<RuleNames>, "suggestions">;
+        type: { [K in keyof InferedType]: InferedType[K] | null };
+        suggestions: string[];
+      };
+      rule = { ...node, suggestions: {} };
+      for (const name of suggestions) {
+        const suggestion: Suggestion = Object.freeze({});
+        suggestionSources.set(suggestion, { rule: dottedName, name });
+        rule.suggestions[name] = suggestion;
+      }
       this.rules.set(dottedName, rule);
+      this.context.nodesTypes.set(rule, {
+        isNullable: type.isNullable ?? undefined,
+        type: type.type ?? undefined,
+      });
     }
     return rule;
   }
@@ -306,6 +341,7 @@ export class Engine<RuleNames extends string = string> {
     copy.publicSituation = { ...this.publicSituation };
     copy.parsedRules = this.parsedRules;
     copy.rules = this.rules;
+    copy.context = this.context;
     copy.warningTexts = [...this.warningTexts];
     copy.unitKey = this.unitKey;
     copy.evaluations = copyCache ? new Map(this.evaluations) : new Map();

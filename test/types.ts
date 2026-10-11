@@ -15,7 +15,9 @@ type Interchangeable<A, B> = [A] extends [B]
 type Assert<T extends true> = T;
 
 type Engines = [F.Engine, P.default];
-type Params<Method extends keyof F.Engine & keyof P.default> = Interchangeable<
+type Params<
+  Method extends Exclude<keyof F.Engine & keyof P.default, "context">,
+> = Interchangeable<
   Parameters<Engines[0][Method]>,
   Parameters<Engines[1][Method]>
 >;
@@ -49,7 +51,7 @@ export type Checks = [
   >,
   Assert<
     Interchangeable<
-      Omit<F.RuleNode, "possibilities">,
+      Omit<F.RuleNode, "possibilities" | "suggestions">,
       Pick<
         P.RuleNode,
         | "dottedName"
@@ -98,6 +100,12 @@ export type Checks = [
     Interchangeable<
       Parameters<F.Engine["evaluate"]>,
       [Exclude<Parameters<P.default["evaluate"]>[0], P.ASTNode>]
+    >
+  >,
+  Assert<
+    Interchangeable<
+      ReturnType<F.Engine["context"]["nodesTypes"]["get"]>,
+      ReturnType<P.default["context"]["nodesTypes"]["get"]>
     >
   >,
   Assert<Params<"setSituation">>,

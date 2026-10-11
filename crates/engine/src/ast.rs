@@ -36,6 +36,15 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn name(self) -> &'static str {
+        match self {
+            Type::Number => "number",
+            Type::Boolean => "boolean",
+            Type::String => "string",
+            Type::Date => "date",
+        }
+    }
+
     pub fn from_constant(name: &str) -> Option<Self> {
         match name {
             "number" => Some(Type::Number),
@@ -105,7 +114,8 @@ pub struct Rule {
     pub possibilities: Option<NodeId>,
     /// References to the ancestors, nearest first.
     pub parents: Vec<NodeId>,
-    pub suggestions: Vec<NodeId>,
+    /// Each suggestion with its name.
+    pub suggestions: Vec<(Rc<str>, NodeId)>,
     /// `rend non applicable` then `remplace`.
     pub replacements: Vec<Replacement>,
     pub question: bool,
@@ -422,7 +432,7 @@ impl Node {
                 let suggestions = rule
                     .suggestions
                     .iter()
-                    .map(|&s| map(s))
+                    .map(|(name, s)| Ok((name.clone(), map(*s)?)))
                     .collect::<Result<_, _>>()?;
                 let possibilities = rule.possibilities.map(&mut map).transpose()?;
                 let parents = rule
@@ -555,7 +565,7 @@ impl Node {
             }
             Node::Inversion { candidates, .. } => children.extend(candidates),
             Node::Rule(rule) => {
-                children.extend(&rule.suggestions);
+                children.extend(rule.suggestions.iter().map(|&(_, s)| s));
                 children.extend(rule.possibilities);
                 children.extend(&rule.parents);
                 children.push(rule.valeur);
@@ -798,12 +808,8 @@ impl Program {
             .or_else(|| self.base_rules.get(name.0 as usize).copied().flatten())
     }
 
-    pub fn base_rule(&self, name: NameId) -> Option<&Rule> {
-        let node = self.base_rules.get(name.0 as usize).copied().flatten()?;
-        match self.node(node) {
-            Node::Rule(rule) => Some(rule),
-            _ => None,
-        }
+    pub fn base_rule_node(&self, name: NameId) -> Option<NodeId> {
+        self.base_rules.get(name.0 as usize).copied().flatten()
     }
 
     pub fn rule(&self, name: NameId) -> Option<&Rule> {

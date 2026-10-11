@@ -16,6 +16,7 @@ export interface NativeEngine {
     strict: boolean,
   ): object;
   evaluate(text: string, json: boolean): object;
+  evaluateSuggestion(rule: string, name: string): object;
   evaluations(): unknown;
   missingVariables(evaluations: unknown, index: number): object;
   takeWarnings(): object;

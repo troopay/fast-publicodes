@@ -630,8 +630,8 @@ impl<'a> Parser<'a> {
             .collect();
         let mut suggestions = Vec::new();
         if let Some(Raw::Map(entries)) = raw.get("suggestions") {
-            for (_, suggestion) in entries.iter() {
-                suggestions.push(self.parse(suggestion)?);
+            for (name, suggestion) in entries.iter() {
+                suggestions.push((name.clone(), self.parse(suggestion)?));
             }
         }
         let mut replacements = self.parse_replacements(raw.get("rend non applicable"), true)?;

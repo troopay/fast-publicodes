@@ -3,7 +3,7 @@
 use serde_json::{Value as Json, json};
 
 use super::Engine;
-use crate::ast::{Node, NodeId, PossibilityKind, Rule, Value};
+use crate::ast::{Node, NodeId, PossibilityKind, Rule, Type, Value};
 use crate::error::{Error, ErrorKind, Result};
 use crate::evaluate::Evaluator;
 use crate::units::Unit;
@@ -43,12 +43,17 @@ impl Engine {
             .map(|&name| self.program.names.name(name))
     }
 
-    fn public_rule(&self, name: &str) -> Result<&Rule> {
-        let rule = self
+    /// The node of the public rule `name`, and the rule.
+    pub(super) fn public_rule(&self, name: &str) -> Result<(NodeId, &Rule)> {
+        let (node, rule) = self
             .program
             .names
             .get(name)
-            .and_then(|id| self.program.base_rule(id))
+            .and_then(|id| self.program.base_rule_node(id))
+            .and_then(|node| match self.program.node(node) {
+                Node::Rule(rule) => Some((node, rule)),
+                _ => None,
+            })
             .ok_or_else(|| {
                 Error::new(
                     ErrorKind::UnknownRule,
@@ -63,24 +68,30 @@ impl Engine {
             )
             .in_rule(name));
         }
-        Ok(rule)
+        Ok((node, rule))
     }
 
-    /// `getRule`: the rule node, without its explanation.
+    /// `getRule`: the rule node, without its explanation and suggestions, `type`, its entry in
+    /// `nodesTypes`, and `suggestions`, the names of its suggestions.
     pub fn rule(&self, name: &str) -> Result<Json> {
-        let rule = self.public_rule(name)?;
+        let (node, rule) = self.public_rule(name)?;
+        let ty = self.program.ty(node).unwrap_or_default();
         let possibilities = match rule.possibilities {
             Some(possibilities) => self.possibilities_json(possibilities, None),
             None => Json::Null,
         };
         Ok(json!({
-            "dottedName": name,
-            "title": rule.title,
-            "nodeKind": "rule",
-            "private": rule.private,
-            "virtualRule": rule.private,
-            "rawNode": rule.raw.to_json(),
-            "possibilities": possibilities,
+            "node": {
+                "dottedName": name,
+                "title": rule.title,
+                "nodeKind": "rule",
+                "private": rule.private,
+                "virtualRule": rule.private,
+                "rawNode": rule.raw.to_json(),
+                "possibilities": possibilities,
+            },
+            "type": { "type": ty.ty.map(Type::name), "isNullable": ty.nullable },
+            "suggestions": rule.suggestions.iter().map(|(name, _)| &**name).collect::<Vec<_>>(),
         }))
     }
 
@@ -92,7 +103,7 @@ impl Engine {
                 "You must enable `flag.filterNotApplicablePossibilities` in engine instantiation to use the filterNotApplicable option",
             ));
         }
-        let Some(possibilities) = self.public_rule(name)?.possibilities else {
+        let Some(possibilities) = self.public_rule(name)?.1.possibilities else {
             return Ok(Json::Null);
         };
         let not_applicable = self.evaluate_not_applicable(possibilities)?;

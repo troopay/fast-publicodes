@@ -46,12 +46,23 @@ export interface RuleNode<Name extends string = string> {
   private: boolean;
   virtualRule: boolean;
   rawNode: Rule;
+  /** What `evaluate()` takes to evaluate each suggestion, as in the rule's context. */
+  suggestions: Record<string, Suggestion>;
   possibilities: {
     nodeKind: "une possibilité";
     type: "number" | "string" | "reference";
     unit?: Unit;
     explanation: Possibility[];
   } | null;
+}
+
+/** A suggestion of a rule, which only `evaluate()` reads. */
+export type Suggestion = Readonly<Record<string, never>>;
+
+/** The type `publicodes` infers for a node. */
+export interface InferedType {
+  isNullable: boolean | undefined;
+  type: "number" | "string" | "boolean" | "date" | undefined;
 }
 
 export type ParsedRules<RuleNames extends string = string> = Record<
