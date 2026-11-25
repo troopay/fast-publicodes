@@ -2,7 +2,7 @@
 //! functions JavaScript gives it.
 
 use std::hash::Hash;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use fast_publicodes::{Engine, Error, ErrorKind, Failure, Today, UnitKey, UnitRef, Warning};
 use rustc_hash::FxHashMap;
@@ -52,7 +52,8 @@ pub enum UnitKeyResult {
 
 /// `getUnitKey`, from a call that fails with a message when JavaScript cannot be called.
 pub fn unit_key(call: impl Fn(&str) -> Result<UnitKeyResult, String> + 'static) -> UnitKey {
-    Rc::new(move |unit| match call(unit) {
+    let call = JsFunction(call);
+    Arc::new(move |unit| match call.get()(unit) {
         Ok(UnitKeyResult::Key(key)) => Ok(key),
         Ok(UnitKeyResult::Error(message)) => Err(Error::new(ErrorKind::Plain, message)),
         Ok(UnitKeyResult::Thrown) => Err(Error::new(
@@ -65,7 +66,24 @@ pub fn unit_key(call: impl Fn(&str) -> Result<UnitKeyResult, String> + 'static) 
 
 /// The current date, from a call that fails with a message when JavaScript cannot be called.
 pub fn today(call: impl Fn() -> Result<String, String> + 'static) -> Today {
-    Rc::new(move || call().map_err(|reason| Error::new(ErrorKind::Internal, reason)))
+    let call = JsFunction(call);
+    Arc::new(move || call.get()().map_err(|reason| Error::new(ErrorKind::Internal, reason)))
+}
+
+/// A call into JavaScript, which only the thread running that JavaScript may make. The engine
+/// requires its functions to be thread-safe; the bindings keep every engine on the thread that
+/// created it, so this one is only called there.
+struct JsFunction<F>(F);
+
+// SAFETY: see `JsFunction`.
+unsafe impl<F> Send for JsFunction<F> {}
+// SAFETY: see `JsFunction`.
+unsafe impl<F> Sync for JsFunction<F> {}
+
+impl<F> JsFunction<F> {
+    fn get(&self) -> &F {
+        &self.0
+    }
 }
 
 /// A value as it is sent: whole the first time, then by the index it took in the table the
@@ -167,7 +185,7 @@ impl Session {
         let reset = self.units.reserve(1);
         SentUnit {
             reset,
-            unit: self.units.send(unit, Rc::clone),
+            unit: self.units.send(unit, Arc::clone),
         }
     }
 }

@@ -3,7 +3,7 @@
 
 use rustc_hash::FxHashSet;
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::ast::{
     Branch, Constant, ContextePair, NameId, Node, NodeId, Program, Replacement, Replacements,
@@ -276,7 +276,7 @@ impl Inliner<'_> {
         if let Some(&node) = self.program.replacement_nodes.get(&key) {
             return node;
         }
-        let source: Rc<[NodeId]> = applicable
+        let source: Arc<[NodeId]> = applicable
             .iter()
             .flat_map(|r| r.references())
             .chain([id])

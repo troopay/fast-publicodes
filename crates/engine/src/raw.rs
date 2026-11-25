@@ -1,13 +1,13 @@
 //! Raw publicodes values: rules as written, and the objects mechanisms build before parsing.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value as Json;
 
 use crate::ast::NodeId;
 use crate::js::number_to_string;
 
-pub type Entries = Vec<(Rc<str>, Raw)>;
+pub type Entries = Vec<(Arc<str>, Raw)>;
 
 /// Cloning shares the strings, lists and maps.
 #[derive(Debug, Clone)]
@@ -17,22 +17,22 @@ pub enum Raw {
     Null,
     Bool(bool),
     Number(f64),
-    String(Rc<str>),
-    List(Rc<Vec<Raw>>),
-    Map(Rc<Entries>),
+    String(Arc<str>),
+    List(Arc<Vec<Raw>>),
+    Map(Arc<Entries>),
     /// An already parsed node.
     Node(NodeId),
 }
 
 impl Raw {
-    pub fn map<K: Into<Rc<str>>>(entries: impl IntoIterator<Item = (K, Raw)>) -> Self {
-        Raw::Map(Rc::new(
+    pub fn map<K: Into<Arc<str>>>(entries: impl IntoIterator<Item = (K, Raw)>) -> Self {
+        Raw::Map(Arc::new(
             entries.into_iter().map(|(k, v)| (k.into(), v)).collect(),
         ))
     }
 
     pub fn list(items: Vec<Raw>) -> Self {
-        Raw::List(Rc::new(items))
+        Raw::List(Arc::new(items))
     }
 
     pub fn str(text: &str) -> Self {
@@ -48,7 +48,7 @@ impl Raw {
 
     pub fn get_mut(&mut self, key: &str) -> Option<&mut Raw> {
         match self {
-            Raw::Map(entries) => Rc::make_mut(entries)
+            Raw::Map(entries) => Arc::make_mut(entries)
                 .iter_mut()
                 .find(|(k, _)| &**k == key)
                 .map(|(_, v)| v),

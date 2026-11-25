@@ -7,7 +7,7 @@ use crate::ast::{ContextePair, Node, NodeId};
 use crate::collation::locale_compare;
 use crate::error::Result;
 use crate::evaluate::to_number;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::raw::Raw;
 
@@ -26,7 +26,7 @@ impl Parser<'_> {
         let valeur = self.parse_field(value, "valeur")?;
         let entries = match value.get("contexte") {
             Some(Raw::Map(entries)) => entries.clone(),
-            _ => Rc::default(),
+            _ => Arc::default(),
         };
         let mut pairs = Vec::with_capacity(entries.len());
         for (name, replacement) in entries.iter() {

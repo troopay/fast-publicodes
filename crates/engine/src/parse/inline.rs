@@ -353,7 +353,7 @@ fn extremum(values: Vec<Raw>, na: NodeId, comparison: &str) -> Raw {
         let Raw::Map(mut entries) = outer else {
             unreachable!("condition builds a map")
         };
-        std::rc::Rc::make_mut(&mut entries).push((
+        std::sync::Arc::make_mut(&mut entries).push((
             "avec".into(),
             Raw::map([
                 ("[privé] $INTERNAL valeur", Raw::map([("valeur", value)])),

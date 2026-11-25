@@ -4,7 +4,7 @@ use super::js_value::{to_number, truthy};
 use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Value};
 use crate::error::{Result, WarningKind};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::units::{Unit, UnitRef, check_convertible, convert_unit, simplify_unit};
 
@@ -68,7 +68,7 @@ impl Evaluator<'_> {
         let unit = if simplified == *from {
             from.clone()
         } else {
-            Rc::new(simplified)
+            Arc::new(simplified)
         };
         let value = match valeur.value {
             Value::Number(n) => Value::Number(convert_unit(Some(&from), Some(&unit), n)?),

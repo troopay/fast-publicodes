@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::js_value::power;
 use super::{Evaluated, Evaluator, UnitSlot};
@@ -36,7 +36,7 @@ impl Evaluator<'_> {
                 let simplified = if simplified == **unit {
                     unit.clone()
                 } else {
-                    Rc::new(simplified)
+                    Arc::new(simplified)
                 };
                 self.convert_node(Some(&simplified), &node)
             }

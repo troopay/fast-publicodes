@@ -1,7 +1,7 @@
 //! Parsed rules: an arena of nodes, the rule names and the table of rule definitions.
 
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use std::cell::RefCell;
 
@@ -30,7 +30,7 @@ pub enum Value {
     /// A number.
     Number(f64),
     /// A string, or a date written `dd/mm/yyyy`.
-    String(Rc<str>),
+    String(Arc<str>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,7 +121,7 @@ pub struct Rule {
     /// References to the ancestors, nearest first.
     pub parents: Vec<NodeId>,
     /// Each suggestion with its name.
-    pub suggestions: Vec<(Rc<str>, NodeId)>,
+    pub suggestions: Vec<(Arc<str>, NodeId)>,
     /// `rend non applicable` then `remplace`.
     pub replacements: Vec<Replacement>,
     pub question: bool,
@@ -146,10 +146,10 @@ pub struct Rule {
 #[derive(Debug, Clone)]
 pub enum SourceArgs {
     /// The arguments of an inline mechanism, as paths of child indices from the node.
-    Inline(Rc<[Box<[u16]>]>),
+    Inline(Arc<[Box<[u16]>]>),
     /// The references of each replacement turning a reference into this node, then the
     /// replaced reference.
-    Replacement(Rc<[NodeId]>),
+    Replacement(Arc<[NodeId]>),
 }
 
 /// A `remplace` or `rend non applicable` entry; its nodes are references.
@@ -659,7 +659,7 @@ struct NameTable {
 #[derive(Debug, Default, Clone)]
 pub struct Names {
     /// The names of the base rules, which copies of the engine share.
-    base: Rc<NameTable>,
+    base: Arc<NameTable>,
     /// The names interned since, numbered after the base ones.
     added: NameTable,
 }
@@ -697,7 +697,7 @@ impl Names {
 
     /// Makes the names so far the base ones, once the base rules are loaded.
     fn freeze(&mut self) {
-        self.base = Rc::new(std::mem::take(&mut self.added));
+        self.base = Arc::new(std::mem::take(&mut self.added));
     }
 }
 
@@ -705,7 +705,7 @@ impl Names {
 #[derive(Clone)]
 pub struct Program {
     /// The nodes of the base rules, which copies of the engine share.
-    base_nodes: Rc<Vec<Node>>,
+    base_nodes: Arc<Vec<Node>>,
     /// The nodes added since, numbered after the base ones.
     nodes: Vec<Node>,
     /// Inferred types, set for the nodes type inference visited.
@@ -736,7 +736,7 @@ pub struct Program {
 impl Program {
     pub fn new(options: Options, today: Today, unit_key: Option<UnitKey>) -> Self {
         Program {
-            base_nodes: Rc::default(),
+            base_nodes: Arc::default(),
             nodes: Vec::new(),
             types: Vec::new(),
             names: Names::default(),
@@ -768,7 +768,7 @@ impl Program {
     /// Makes the nodes and names so far the base ones, which copies of the engine share, once
     /// the base rules are loaded.
     pub fn freeze(&mut self) {
-        self.base_nodes = Rc::new(std::mem::take(&mut self.nodes));
+        self.base_nodes = Arc::new(std::mem::take(&mut self.nodes));
         self.names.freeze();
     }
 
@@ -793,7 +793,7 @@ impl Program {
         let index = id.0 as usize;
         let base = self.base_nodes.len();
         if index < base {
-            &mut Rc::make_mut(&mut self.base_nodes)[index]
+            &mut Arc::make_mut(&mut self.base_nodes)[index]
         } else {
             &mut self.nodes[index - base]
         }

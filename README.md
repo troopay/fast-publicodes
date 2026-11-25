@@ -39,7 +39,7 @@ cargo add fast-publicodes
 Rules and situations are given as JSON; see the [crate documentation](crates/engine/README.md).
 
 ```rust
-let today = Rc::new(|| Ok("25/11/2026".to_owned()));
+let today = Arc::new(|| Ok("25/11/2026".to_owned()));
 let mut engine = Engine::new(&rules, Options::default(), today, None).unwrap();
 engine.set_situation(&json!({ "salaire brut": 3000 }), SituationOptions::default()).unwrap();
 engine.evaluate(&json!("salaire net")).unwrap();

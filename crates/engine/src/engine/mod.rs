@@ -3,7 +3,7 @@
 mod rules;
 mod situation;
 
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
@@ -48,14 +48,18 @@ struct EvaluationList {
 impl Evaluations {
     /// The missing variables of the evaluation at `index`, named by `Engine::missing_variables`.
     pub fn missing(&self, index: u32) -> Option<Missing> {
-        let list = self.0.borrow();
-        list.evaluated
+        self.list()
+            .evaluated
             .get(index as usize)
             .map(|evaluated| evaluated.missing.clone())
     }
 
+    fn list(&self) -> RefMut<'_, EvaluationList> {
+        self.0.borrow_mut()
+    }
+
     fn push(&self, evaluated: Evaluated) -> u32 {
-        let mut list = self.0.borrow_mut();
+        let mut list = self.list();
         list.evaluated.push(evaluated);
         list.evaluated.len() as u32 - 1
     }
@@ -83,6 +87,24 @@ pub struct Engine {
     expressions: Evaluations,
     /// What each expression evaluated so far references directly, if anything.
     referenced_rules: FxHashMap<Box<str>, Option<Reference>>,
+}
+
+/// An engine's rules and situation, without its evaluations. Unlike an `Engine`, it can be sent
+/// to another thread, where `Engine::from` starts an engine from it.
+#[derive(Clone)]
+pub struct Snapshot {
+    program: Program,
+    templates: Templates,
+    base_len: usize,
+    situation: Vec<(String, Raw)>,
+    public_situation: Vec<String>,
+    referenced_rules: FxHashMap<Box<str>, Option<Reference>>,
+}
+
+impl From<Snapshot> for Engine {
+    fn from(snapshot: Snapshot) -> Self {
+        Engine::with_state(snapshot, EvalState::default(), Evaluations::default())
+    }
 }
 
 /// Why the rules could not be loaded, with the warnings raised before.
@@ -138,40 +160,62 @@ impl Engine {
                 return Err(Failure { error, warnings });
             }
         };
-        Ok(Self {
+        Ok(Engine::from(Snapshot {
             base_len: program.len(),
             program,
             templates,
             situation: Vec::new(),
             public_situation: Vec::new(),
-            state: EvalState::default(),
-            expressions: Evaluations::default(),
             referenced_rules: FxHashMap::default(),
-        })
+        }))
+    }
+
+    fn with_state(snapshot: Snapshot, state: EvalState, expressions: Evaluations) -> Self {
+        let Snapshot {
+            program,
+            templates,
+            base_len,
+            situation,
+            public_situation,
+            referenced_rules,
+        } = snapshot;
+        Engine {
+            program,
+            templates,
+            base_len,
+            situation,
+            public_situation,
+            state,
+            expressions,
+            referenced_rules,
+        }
+    }
+
+    /// The rules and situation of this engine, sharing its parsed rules.
+    pub fn snapshot(&self) -> Snapshot {
+        let snapshot = Snapshot {
+            program: self.program.clone(),
+            templates: self.templates.clone(),
+            base_len: self.base_len,
+            situation: self.situation.clone(),
+            public_situation: self.public_situation.clone(),
+            referenced_rules: self.referenced_rules.clone(),
+        };
+        snapshot.program.warnings.borrow_mut().clear();
+        snapshot
     }
 
     /// `shallowCopy`: an engine with the same rules and situation, and this cache if
     /// `copy_cache`, but no inversion failure.
     pub fn shallow_copy(&self, copy_cache: bool) -> Engine {
         let (mut state, expressions) = if copy_cache {
-            let list = self.expressions.0.borrow().clone();
+            let list = self.expressions.list().clone();
             (self.state.clone(), Evaluations(Rc::new(RefCell::new(list))))
         } else {
             (self.state.fork(false), Evaluations::default())
         };
         state.forget_inversion_fail();
-        let copy = Engine {
-            program: self.program.clone(),
-            templates: self.templates.clone(),
-            base_len: self.base_len,
-            situation: self.situation.clone(),
-            public_situation: self.public_situation.clone(),
-            state,
-            expressions,
-            referenced_rules: self.referenced_rules.clone(),
-        };
-        copy.program.warnings.borrow_mut().clear();
-        copy
+        Engine::with_state(self.snapshot(), state, expressions)
     }
 
     /// Forgets the evaluations, as setting a situation does.
@@ -269,22 +313,16 @@ impl Engine {
             let index = self.expressions.push(evaluated.clone());
             return Ok((evaluated, index));
         };
-        let cached = self
-            .expressions
-            .0
-            .borrow()
-            .strings
-            .get(&**expression)
-            .copied();
-        if let Some(index) = cached {
-            let list = self.expressions.0.borrow();
-            return Ok((list.evaluated[index as usize].clone(), index));
+        {
+            let list = self.expressions.list();
+            if let Some(&index) = list.strings.get(&**expression) {
+                return Ok((list.evaluated[index as usize].clone(), index));
+            }
         }
         let evaluated = self.evaluate_value(value)?;
         let index = self.expressions.push(evaluated.clone());
         self.expressions
-            .0
-            .borrow_mut()
+            .list()
             .strings
             .insert(expression.to_string(), index);
         Ok((evaluated, index))

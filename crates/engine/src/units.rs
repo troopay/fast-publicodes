@@ -1,7 +1,7 @@
 //! Units: parsing, serialization, inference and conversion.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use rustc_hash::FxHashMap;
@@ -10,7 +10,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::js::round_to_16_decimals;
 
 /// A shared unit.
-pub type UnitRef = Rc<Unit>;
+pub type UnitRef = Arc<Unit>;
 
 /// A unit: base units multiplied together, divided by others.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -22,7 +22,7 @@ pub struct Unit {
 }
 
 /// `getUnitKey`: the key a written base unit stands for.
-pub type UnitKey = Rc<dyn Fn(&str) -> Result<String>>;
+pub type UnitKey = Arc<dyn Fn(&str) -> Result<String> + Send + Sync>;
 
 pub fn parse_unit(text: &str) -> Result<Unit> {
     parse_unit_with(text, None)
@@ -163,7 +163,7 @@ pub fn infer_unit(operator: UnitOperator, units: [Option<&UnitRef>; 2]) -> Optio
                         .cloned()
                         .collect(),
                 };
-                Some(Rc::new(simplify(&product, |a, b| a == b)))
+                Some(Arc::new(simplify(&product, |a, b| a == b)))
             }
         };
     }
@@ -185,7 +185,7 @@ pub fn infer_unit(operator: UnitOperator, units: [Option<&UnitRef>; 2]) -> Optio
                     .cloned()
                     .collect(),
             };
-            Some(Rc::new(simplify(&product, |a, b| a == b)))
+            Some(Arc::new(simplify(&product, |a, b| a == b)))
         }
         ([Some(left), Some(_)], UnitOperator::Plus | UnitOperator::Minus) => Some(left.clone()),
         ([Some(_), Some(_)], _) => None,

@@ -3,7 +3,7 @@
 use super::Parser;
 use crate::ast::{Node, NodeId, PossibilityKind, Type, Value};
 use crate::error::{Error, ErrorKind, Result, WarningKind};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::raw::{Entries, Raw};
 use crate::units::{UnitRef, convert_unit, serialize_unit};
@@ -40,7 +40,7 @@ impl Parser<'_> {
                     .iter()
                     .position(|(k, v)| &**k == "une possibilité" && v.is_truthy())
             {
-                possibilities = Some(Rc::make_mut(entries).remove(index).1);
+                possibilities = Some(Arc::make_mut(entries).remove(index).1);
                 self.deprecated(message.to_owned());
             }
         }

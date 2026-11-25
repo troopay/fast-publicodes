@@ -6,7 +6,7 @@ mod replacements;
 mod sub_engines;
 
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub use inline::Templates;
 
@@ -165,7 +165,7 @@ impl<'a> Parser<'a> {
                 .filter(|(k, _)| &**k != *name)
                 .cloned()
                 .collect();
-            let values = Raw::map([("valeur", Raw::Map(Rc::new(rest))), (*name, param)]);
+            let values = Raw::map([("valeur", Raw::Map(Arc::new(rest))), (*name, param)]);
             return self.parse_mechanism(name, &values);
         }
         match raw {
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
                 };
                 let unit = parse_unit_with(text, self.program.unit_key.as_ref())?;
                 Ok(self.push(Node::Unite {
-                    unit: Rc::new(unit),
+                    unit: Arc::new(unit),
                     valeur,
                 }))
             }
@@ -351,7 +351,7 @@ impl<'a> Parser<'a> {
         Ok(self.push(Node::Duree {
             depuis,
             jusqua,
-            unit: Rc::new(unit),
+            unit: Arc::new(unit),
         }))
     }
 
@@ -483,7 +483,7 @@ impl<'a> Parser<'a> {
             _ => Value::Undefined,
         };
         let unit = match (ty, value.get("rawUnit").and_then(Raw::as_str)) {
-            (Some(Type::Number), Some(raw_unit)) => Some(Rc::new(parse_unit_with(
+            (Some(Type::Number), Some(raw_unit)) => Some(Arc::new(parse_unit_with(
                 raw_unit,
                 self.program.unit_key.as_ref(),
             )?)),
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
                 Raw::String(text) => Raw::map([("valeur", Raw::String(text.clone()))]),
                 Raw::Number(n) => Raw::map([("valeur", Raw::str(&number_to_string(*n)))]),
                 Raw::Map(_) => value.clone(),
-                Raw::Null | Raw::List(_) => Raw::Map(Rc::default()),
+                Raw::Null | Raw::List(_) => Raw::Map(Arc::default()),
                 Raw::Undefined | Raw::Bool(_) | Raw::Node(_) => {
                     return Err(Error::syntax(format!(
                         "Rule {name} is incorrectly written. Please give it a proper value.\n {}",
@@ -606,8 +606,8 @@ impl<'a> Parser<'a> {
                 ]);
             }
         }
-        value.insert(0, ("avec".into(), Raw::Map(Rc::new(avec))));
-        let valeur = self.parse(&Raw::Map(Rc::new(value)))?;
+        value.insert(0, ("avec".into(), Raw::Map(Arc::new(avec))));
+        let valeur = self.parse(&Raw::Map(Arc::new(value)))?;
 
         let ancestors = if self.program.options.automatic_namespace_disabling {
             rule_parents(dotted_name)

@@ -2,7 +2,7 @@
 
 use super::js_value::{compare, to_number};
 use super::{Evaluated, Evaluator, Missing, UnitSlot};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::ast::{NodeId, Tranche, TrancheMechanism, Value};
 use crate::error::{Error, Result, WarningKind};
@@ -295,7 +295,7 @@ impl Evaluator<'_> {
             Error::evaluation("Une tranche de taux progressif doit avoir un taux")
         })?;
         let taux = self.evaluate(taux)?;
-        self.convert_node(Some(&Rc::new(percent())), &taux)
+        self.convert_node(Some(&Arc::new(percent())), &taux)
     }
 
     fn taux_progressif(
@@ -305,7 +305,7 @@ impl Evaluator<'_> {
         multiplicateur: Evaluated,
     ) -> Result<Evaluated> {
         let bounded = self.bound_tranches(tranches, &assiette, &multiplicateur)?;
-        let unit = UnitSlot::present(Some(Rc::new(percent())));
+        let unit = UnitSlot::present(Some(Arc::new(percent())));
         let result = |value, missing| Evaluated {
             value,
             unit: unit.clone(),

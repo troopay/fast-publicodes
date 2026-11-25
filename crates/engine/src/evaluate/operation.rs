@@ -5,7 +5,7 @@ use super::{Evaluated, Evaluator, UnitSlot};
 use crate::ast::{NodeId, Operator, Value};
 use crate::date::{is_date_string, timestamp};
 use crate::error::{Result, WarningKind};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::units::{Unit, UnitOperator, UnitRef, infer_unit, is_percent, serialize_unit};
 
@@ -31,7 +31,7 @@ fn unit_operator(operator: Operator) -> Option<UnitOperator> {
 }
 
 fn per_percent() -> UnitRef {
-    Rc::new(Unit {
+    Arc::new(Unit {
         numerators: Vec::new(),
         denominators: vec!["%".to_owned()],
     })
