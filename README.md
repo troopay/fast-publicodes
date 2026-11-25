@@ -1,6 +1,6 @@
 # fast-publicodes
 
-A port of [publicodes](https://github.com/publicodes/publicodes) 1.x with its engine rewritten in Rust: the same API and the same behaviour, faster. Node loads it as a native addon, prebuilt for Linux, macOS and Windows; browsers, other runtimes and other platforms load it as WebAssembly, from the same package.
+A port of [publicodes](https://github.com/publicodes/publicodes) 1.x with its engine rewritten in Rust: the same API and the same behaviour, faster. Node loads it as a native addon, prebuilt for Linux, macOS and Windows; browsers, other runtimes and other platforms load it as WebAssembly, from the same package. Rust programs use the engine directly, as a crate.
 
 > **Not affiliated with the publicodes project.** fast-publicodes is an independent port. The language, its features and every discussion about them belong to [publicodes](https://github.com/publicodes/publicodes): propose features and report language issues there, not here. If publicodes is useful to you, support its authors: star the repository, contribute, and credit them.
 
@@ -15,6 +15,8 @@ Stay with publicodes when its speed is enough for you, or when you need what fas
 
 ## Usage
 
+### JavaScript and TypeScript
+
 ```bash
 npm install fast-publicodes
 ```
@@ -28,7 +30,20 @@ const engine = new Engine(rules);
 engine.setSituation({ "salaire brut": 3000 }).evaluate("salaire net");
 ```
 
-From Rust, use the engine directly: the [`fast-publicodes`](crates/engine/README.md) crate.
+### Rust
+
+```bash
+cargo add fast-publicodes
+```
+
+Rules and situations are given as JSON; see the [crate documentation](crates/engine/README.md).
+
+```rust
+let today = Rc::new(|| Ok("25/11/2026".to_owned()));
+let mut engine = Engine::new(&rules, Options::default(), today, None).unwrap();
+engine.set_situation(&json!({ "salaire brut": 3000 }), SituationOptions::default()).unwrap();
+engine.evaluate(&json!("salaire net")).unwrap();
+```
 
 ## Performance
 
