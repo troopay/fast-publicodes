@@ -28,6 +28,8 @@ const engine = new Engine(rules);
 engine.setSituation({ "salaire brut": 3000 }).evaluate("salaire net");
 ```
 
+From Rust, use the engine directly: the [`fast-publicodes`](crates/engine/README.md) crate.
+
 ## Performance
 
 On the [modele-social](https://www.npmjs.com/package/modele-social) rules (`pnpm bench`, Node, one machine):

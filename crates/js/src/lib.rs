@@ -4,7 +4,7 @@
 use std::hash::Hash;
 use std::rc::Rc;
 
-use fast_publicodes_engine::{Engine, Error, ErrorKind, Failure, Today, UnitKey, UnitRef, Warning};
+use fast_publicodes::{Engine, Error, ErrorKind, Failure, Today, UnitKey, UnitRef, Warning};
 use rustc_hash::FxHashMap;
 use serde_json::Value as Json;
 

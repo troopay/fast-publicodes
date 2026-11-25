@@ -1,4 +1,4 @@
-use fast_publicodes_engine::{Error as EngineError, Evaluations, Options, SituationOptions, Value};
+use fast_publicodes::{Error as EngineError, Evaluations, Options, SituationOptions, Value};
 use fast_publicodes_js::{
     Sent, Session, UnitKeyResult, error_json, expression, failure_json, parse_json, today, unit_key,
 };
@@ -85,7 +85,7 @@ impl NativeEngine {
             None => None,
         };
         let get_today = callback(env, get_today)?;
-        let engine = fast_publicodes_engine::Engine::new(
+        let engine = fast_publicodes::Engine::new(
             &json(&rules)?,
             options,
             today(move || get_today(())),
@@ -297,7 +297,7 @@ pub fn parse_expression<'env>(
     expression: String,
     dotted_name: String,
 ) -> Result<Object<'env>> {
-    match fast_publicodes_engine::parse_expression(&expression, &dotted_name) {
+    match fast_publicodes::parse_expression(&expression, &dotted_name) {
         Ok(tree) => {
             let mut result = Object::new(env)?;
             result.set_named_property("expression", tree.to_string())?;

@@ -8,8 +8,10 @@ use crate::error::{Error, ErrorKind, Result, WarningKind};
 use crate::evaluate::{Evaluated, Evaluator, to_js_string};
 use crate::raw::Raw;
 
+/// The options of `Engine::set_situation`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SituationOptions {
+    /// Extends the previous situation instead of replacing it.
     pub keep_previous: bool,
     /// Forces strict checks of the situation; otherwise the `strict` option decides.
     pub strict: bool,
@@ -20,8 +22,11 @@ pub struct SituationOptions {
 /// `accepted`, as a successful one would.
 #[derive(Debug)]
 pub struct SituationError {
+    /// The error.
     pub error: Error,
+    /// Whether the situation was reset.
     pub situation_reset: bool,
+    /// The names `getSituation` gains.
     pub accepted: Vec<String>,
 }
 

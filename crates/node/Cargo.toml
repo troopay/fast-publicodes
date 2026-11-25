@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-fast-publicodes-engine = { path = "../engine" }
+fast-publicodes = { path = "../engine" }
 fast-publicodes-js = { path = "../js" }
 napi = { version = "=3.14.2", default-features = false, features = ["napi9"] }
 napi-derive = "=3.6.12"

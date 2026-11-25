@@ -9,11 +9,15 @@ use rustc_hash::FxHashMap;
 use crate::error::{Error, ErrorKind, Result};
 use crate::js::round_to_16_decimals;
 
+/// A shared unit.
 pub type UnitRef = Rc<Unit>;
 
+/// A unit: base units multiplied together, divided by others.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Unit {
+    /// The base units multiplied.
     pub numerators: Vec<String>,
+    /// The base units divided by.
     pub denominators: Vec<String>,
 }
 

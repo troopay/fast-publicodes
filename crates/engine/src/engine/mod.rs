@@ -26,8 +26,11 @@ use crate::units::{UnitKey, UnitRef};
 /// The result of `evaluate`: its value and unit, and its index in `Engine::evaluations`.
 #[derive(Debug, Clone)]
 pub struct Evaluation {
+    /// The value.
     pub value: Value,
+    /// The unit, if any.
     pub unit: Option<UnitRef>,
+    /// Its index in `Engine::evaluations`, where its missing variables are read.
     pub index: u32,
 }
 
@@ -43,6 +46,7 @@ struct EvaluationList {
 }
 
 impl Evaluations {
+    /// The missing variables of the evaluation at `index`, named by `Engine::missing_variables`.
     pub fn missing(&self, index: u32) -> Option<Missing> {
         let list = self.0.borrow();
         list.evaluated
@@ -65,6 +69,7 @@ enum Reference {
     Replaced(NodeId),
 }
 
+/// `Engine`: parsed rules, a situation and the evaluations cached since it was set.
 pub struct Engine {
     program: Program,
     templates: Templates,
@@ -83,7 +88,9 @@ pub struct Engine {
 /// Why the rules could not be loaded, with the warnings raised before.
 #[derive(Debug)]
 pub struct Failure {
+    /// The error.
     pub error: Error,
+    /// The warnings raised before it.
     pub warnings: Vec<Warning>,
 }
 
@@ -106,6 +113,8 @@ fn load(program: &mut Program, rules: &Raw) -> Result<Templates> {
 }
 
 impl Engine {
+    /// Parses `rules`. `today` gives the date `durée` counts from, and `unit_key`, as
+    /// `getUnitKey`, the key each written base unit stands for.
     pub fn new(
         rules: &Json,
         options: Options,
@@ -165,6 +174,7 @@ impl Engine {
         copy
     }
 
+    /// Forgets the evaluations, as setting a situation does.
     pub fn reset_cache(&mut self) {
         self.state.clear();
         self.expressions = Evaluations::default();

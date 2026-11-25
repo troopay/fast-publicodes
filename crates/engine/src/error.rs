@@ -6,26 +6,41 @@ use std::fmt;
 /// given, which aborts the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
+    /// A rule or an expression that does not parse.
     Syntax,
+    /// An expression that cannot be evaluated.
     Evaluation,
+    /// An invalid situation.
     Situation,
+    /// A reference to a rule that does not exist.
     UnknownRule,
+    /// A reference from outside the rules to a private rule.
     PrivateRule,
+    /// A misuse of the engine.
     Engine,
+    /// An unexpected failure.
     Internal,
+    /// A JavaScript `Error`.
     Plain,
+    /// A JavaScript `TypeError`.
     Type,
+    /// A value thrown by a function the engine was given.
     Thrown,
 }
 
+/// An error, displayed as `publicodes` writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Error {
+    /// Its kind.
     pub kind: ErrorKind,
+    /// Its message.
     pub message: String,
+    /// The rule it occurred in, if any.
     pub rule: Option<String>,
 }
 
 impl Error {
+    /// An error of `kind`, outside any rule.
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
@@ -34,16 +49,16 @@ impl Error {
         }
     }
 
-    pub fn in_rule(mut self, rule: impl Into<String>) -> Self {
+    pub(crate) fn in_rule(mut self, rule: impl Into<String>) -> Self {
         self.rule.get_or_insert_with(|| rule.into());
         self
     }
 
-    pub fn syntax(message: impl Into<String>) -> Self {
+    pub(crate) fn syntax(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Syntax, message)
     }
 
-    pub fn evaluation(message: impl Into<String>) -> Self {
+    pub(crate) fn evaluation(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Evaluation, message)
     }
 }
@@ -130,16 +145,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// The `warn` option each warning depends on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WarningKind {
+    /// `experimentalRules`.
     ExperimentalRules,
+    /// `unitConversion`.
     UnitConversion,
+    /// `cyclicReferences`.
     CyclicReferences,
+    /// `deprecatedSyntax`.
     DeprecatedSyntax,
+    /// `situationIssues`.
     SituationIssues,
 }
 
+/// A warning, displayed as `publicodes` writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Warning {
+    /// The option it depends on.
     pub kind: WarningKind,
+    /// Its message.
     pub message: String,
     /// The rule the warning is about, if any.
     pub rule: Option<String>,

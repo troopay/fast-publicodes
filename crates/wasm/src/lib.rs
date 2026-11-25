@@ -1,6 +1,6 @@
 //! The engine for WebAssembly, with the interface of the Node addon.
 
-use fast_publicodes_engine::{
+use fast_publicodes::{
     Engine, Error as EngineError, Evaluations, Options, SituationOptions, Value,
 };
 use fast_publicodes_js::{
@@ -271,7 +271,7 @@ impl WasmEngine {
 /// `parseExpression`: returns `{ expression }`, as JSON, or `{ error }`.
 #[wasm_bindgen(js_name = parseExpression)]
 pub fn parse_expression(expression: &str, dotted_name: &str) -> Object {
-    match fast_publicodes_engine::parse_expression(expression, dotted_name) {
+    match fast_publicodes::parse_expression(expression, dotted_name) {
         Ok(tree) => {
             let result = Object::new();
             set(&result, "expression", tree.to_string());

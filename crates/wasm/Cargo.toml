@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-fast-publicodes-engine = { path = "../engine" }
+fast-publicodes = { path = "../engine" }
 fast-publicodes-js = { path = "../js" }
 js-sys = "=0.3.106"
 serde_json = { version = "=1.0.151", features = ["preserve_order"] }

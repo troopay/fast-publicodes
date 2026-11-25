@@ -42,8 +42,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
-name = "fast-publicodes-engine"
-version = "0.1.0"
+name = "fast-publicodes"
+version = "1.1.1"
 dependencies = [
  "rustc-hash",
  "ryu-js",
@@ -54,7 +54,7 @@ dependencies = [
 name = "fast-publicodes-js"
 version = "0.1.0"
 dependencies = [
- "fast-publicodes-engine",
+ "fast-publicodes",
  "rustc-hash",
  "serde_json",
 ]
@@ -63,7 +63,7 @@ dependencies = [
 name = "fast-publicodes-node"
 version = "0.1.0"
 dependencies = [
- "fast-publicodes-engine",
+ "fast-publicodes",
  "fast-publicodes-js",
  "napi",
  "napi-build",
@@ -75,7 +75,7 @@ dependencies = [
 name = "fast-publicodes-wasm"
 version = "0.1.0"
 dependencies = [
- "fast-publicodes-engine",
+ "fast-publicodes",
  "fast-publicodes-js",
  "js-sys",
  "serde_json",

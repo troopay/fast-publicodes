@@ -2,28 +2,44 @@
 
 use serde_json::Value as Json;
 
+/// The `strict` options.
 #[derive(Debug, Clone, Copy)]
 pub struct Strict {
+    /// `situation`.
     pub situation: bool,
+    /// `noOrphanRule`.
     pub no_orphan_rule: bool,
+    /// `noCycleRuntime`.
     pub no_cycle_runtime: bool,
+    /// `checkPossibleValues`.
     pub check_possible_values: bool,
 }
 
+/// The `warn` options.
 #[derive(Debug, Clone, Copy)]
 pub struct Warn {
+    /// `experimentalRules`.
     pub experimental_rules: bool,
+    /// `unitConversion`.
     pub unit_conversion: bool,
+    /// `cyclicReferences`.
     pub cyclic_references: bool,
+    /// `deprecatedSyntax`.
     pub deprecated_syntax: bool,
+    /// `situationIssues`.
     pub situation_issues: bool,
 }
 
+/// The options of an `Engine`; `Default` gives those of `publicodes`.
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
+    /// `strict`.
     pub strict: Strict,
+    /// `warn`.
     pub warn: Warn,
+    /// `flag.filterNotApplicablePossibilities`.
     pub filter_not_applicable_possibilities: bool,
+    /// `flag.automaticNamespaceDisabling`.
     pub automatic_namespace_disabling: bool,
     /// The iterations of the root search of inversions and circular references, when set.
     pub inversion_max_iterations: Option<f64>,

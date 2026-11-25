@@ -1,11 +1,15 @@
 [package]
-name = "fast-publicodes-engine"
-version = "0.1.0"
+name = "fast-publicodes"
+version = "1.1.1"
+description = "The publicodes 1.x engine, rewritten in Rust with the same behaviour."
+keywords = ["publicodes", "rules", "engine"]
+categories = ["compilers", "finance"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
-ryu-js = "=1.0.3"
-rustc-hash = "=2.1.3"
-serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+ryu-js = "1.0.3"
+rustc-hash = "2.1.3"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }

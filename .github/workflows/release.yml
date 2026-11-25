@@ -1,6 +1,6 @@
 name: Release
 
-# A `vX.Y.Z` tag publishes that version; a manual run goes through every step
+# A `vX.Y.Z` tag publishes that version to npm and crates.io; a manual run goes through every step
 # without publishing.
 on:
   push:
@@ -137,3 +137,24 @@ jobs:
           path: native
           merge-multiple: true
       - run: npm publish --access public ${{ env.DRY_RUN == 'true' && '--dry-run' || '' }}
+
+  publish-crate:
+    needs: [ci, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DRY_RUN: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - name: Check that the tag names the crate version
+        if: env.DRY_RUN == 'false'
+        run: test "v$(cargo pkgid -p fast-publicodes | sed 's/.*@//')" = "$GITHUB_REF_NAME"
+      - if: env.DRY_RUN == 'false'
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish -p fast-publicodes ${{ env.DRY_RUN == 'true' && '--dry-run' || '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

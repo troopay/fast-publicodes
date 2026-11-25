@@ -18,12 +18,18 @@ pub struct NodeId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NameId(pub u32);
 
+/// A value as `publicodes` evaluates it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// `undefined`: unknown, for lack of a value in the situation.
     Undefined,
+    /// `null`: not applicable.
     Null,
+    /// A boolean.
     Bool(bool),
+    /// A number.
     Number(f64),
+    /// A string, or a date written `dd/mm/yyyy`.
     String(Rc<str>),
 }
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-fast-publicodes is an npm package with the same API and behaviour as `publicodes` 1.x, whose engine is reimplemented in Rust for speed. It runs on Node as a native addon and elsewhere, browsers included, as WebAssembly.
+fast-publicodes is an npm package with the same API and behaviour as `publicodes` 1.x, whose engine is reimplemented in Rust for speed. It runs on Node as a native addon and elsewhere, browsers included, as WebAssembly. The engine is also published on its own as the Rust crate `fast-publicodes`.
 
 ## Architecture
 

@@ -20,20 +20,21 @@ thread_local! {
 }
 
 impl Missing {
-    pub fn single(name: NameId, score: f64) -> Self {
+    pub(crate) fn single(name: NameId, score: f64) -> Self {
         Self(Some(Rc::from([(name, score)])))
     }
 
+    /// Whether no variable is missing.
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(NameId, f64)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &(NameId, f64)> {
         self.0.iter().flat_map(|entries| entries.iter())
     }
 
     /// `mergeMissing`: the entries of `self`, then those of `other` it lacks, scores summed.
-    pub fn merge(&self, other: &Missing) -> Missing {
+    pub(crate) fn merge(&self, other: &Missing) -> Missing {
         match (&self.0, &other.0) {
             (_, None) => self.clone(),
             (None, _) => other.clone(),
@@ -63,7 +64,7 @@ impl Missing {
     }
 
     /// `bonus`: every score plus one.
-    pub fn bonus(&self) -> Missing {
+    pub(crate) fn bonus(&self) -> Missing {
         Missing(self.0.as_ref().map(|entries| {
             entries
                 .iter()
@@ -72,16 +73,16 @@ impl Missing {
         }))
     }
 
-    pub fn max_score(&self) -> f64 {
+    pub(crate) fn max_score(&self) -> f64 {
         self.iter()
             .fold(0., |max, &(_, score)| if max > score { max } else { score })
     }
 
-    pub fn contains(&self, name: NameId) -> bool {
+    pub(crate) fn contains(&self, name: NameId) -> bool {
         self.iter().any(|&(n, _)| n == name)
     }
 
-    pub fn retain(&self, keep: impl Fn(NameId) -> bool) -> Missing {
+    pub(crate) fn retain(&self, keep: impl Fn(NameId) -> bool) -> Missing {
         let kept: Vec<(NameId, f64)> = self
             .iter()
             .copied()
@@ -95,7 +96,7 @@ impl Missing {
     }
 
     /// `missing[name] = score`.
-    pub fn with(&self, name: NameId, score: f64) -> Missing {
+    pub(crate) fn with(&self, name: NameId, score: f64) -> Missing {
         let mut entries: Vec<(NameId, f64)> = self.iter().copied().collect();
         match entries.iter_mut().find(|(n, _)| *n == name) {
             Some(entry) => entry.1 = score,

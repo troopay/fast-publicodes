@@ -1,3 +1,6 @@
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
+
 mod ast;
 mod collation;
 mod date;
@@ -21,7 +24,8 @@ pub use date::Today;
 pub use engine::{Engine, Evaluation, Evaluations, Failure, SituationError, SituationOptions};
 pub use error::{Error, ErrorKind, Warning, WarningKind};
 pub use evaluate::Missing;
-pub use options::Options;
+pub use options::{Options, Strict, Warn};
+pub use serde_json;
 pub use units::{Unit, UnitKey, UnitRef};
 
 /// `parseExpression`: the expression as the objects `publicodes` builds.
