@@ -1,6 +1,6 @@
 [package]
 name = "fast-publicodes"
-version = "1.1.1"
+version = "1.2.0"
 description = "The publicodes 1.x engine, rewritten in Rust with the same behaviour."
 keywords = ["publicodes", "rules", "engine"]
 categories = ["compilers", "finance"]
